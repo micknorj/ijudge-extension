@@ -1,0 +1,28 @@
+# TypeScript source
+src/**
+
+# Development configuration
+.vscode/**
+
+# TypeScript configuration
+tsconfig.json
+
+# Git
+.git/**
+.gitignore
+
+# npm development dependencies
+node_modules/**
+
+# Development metadata
+package-lock.json
+
+# Source maps
+**/*.map
+
+# Previous VSIX packages
+*.vsix
+
+# Logs
+*.log
+npm-debug.log*
