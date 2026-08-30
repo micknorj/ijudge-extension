@@ -4,15 +4,17 @@ import {
 } from "./actions";
 
 import {
-    SessionExpiredError,
-} from "./errors";
+    assertAuthenticatedResponse,
+    fetchIJudge,
+    ijUrl,
+    isRedirect,
+    isSessionExpiredResponse,
+    readTextLimited,
+} from "./http";
 
 
-const BASE_URL =
-    "https://ijudge.it.kmitl.ac.th";
-
-const REQUEST_TIMEOUT_MS =
-    15_000;
+const MAX_RSC_BYTES =
+    8 * 1024 * 1024;
 
 
 export interface LoginResult {
@@ -24,18 +26,14 @@ export async function loginToIJudge(
     username: string,
     password: string
 ): Promise<LoginResult> {
-    const loginAction =
+    const action =
         await getLoginAction();
 
     const response =
-        await fetchWithTimeout(
-            `${BASE_URL}/signin`,
+        await fetchIJudge(
+            "/signin",
             {
-                method:
-                    "POST",
-
-                redirect:
-                    "manual",
+                method: "POST",
 
                 headers: {
                     Accept:
@@ -45,13 +43,13 @@ export async function loginToIJudge(
                         "text/plain;charset=UTF-8",
 
                     "Next-Action":
-                        loginAction,
+                        action,
 
                     Origin:
-                        BASE_URL,
+                        "https://ijudge.it.kmitl.ac.th",
 
                     Referer:
-                        `${BASE_URL}/signin`,
+                        "https://ijudge.it.kmitl.ac.th/signin",
                 },
 
                 body:
@@ -65,17 +63,11 @@ export async function loginToIJudge(
             }
         );
 
-
     if (
         response.status !== 303
     ) {
-        /*
-         * Force rediscovery on the next login attempt
-         * if the server action may have become invalid.
-         *
-         * Credentials are not automatically retried.
-         */
         if (
+            response.status === 400 ||
             response.status === 404 ||
             response.status >= 500
         ) {
@@ -83,38 +75,25 @@ export async function loginToIJudge(
         }
 
         throw new Error(
-            `iJudge login failed with HTTP ` +
-            `${response.status}.`
+            `iJudge login failed with HTTP ${response.status}.`
         );
     }
 
-
-    const setCookie =
+    const cookie =
         response.headers.get(
             "set-cookie"
         );
 
-
-    if (!setCookie) {
-        throw new Error(
-            "iJudge did not return a login session."
-        );
-    }
-
-
     const match =
-        setCookie.match(
+        cookie?.match(
             /(?:^|,\s*|;\s*)access_token=([^;,\s]+)/
         );
 
-
     if (!match) {
         throw new Error(
-            "iJudge login succeeded, " +
-            "but no access token was found."
+            "iJudge login succeeded, but no access token was returned."
         );
     }
-
 
     return {
         accessToken:
@@ -127,70 +106,45 @@ export async function isSessionValid(
     accessToken: string
 ): Promise<boolean> {
     const response =
-        await fetchWithTimeout(
-            `${BASE_URL}/courses`,
+        await fetchIJudge(
+            "/courses",
             {
-                method:
-                    "GET",
-
-                redirect:
-                    "manual",
-
                 headers: {
-                    Cookie:
-                        `access_token=${accessToken}`,
-
                     Accept:
                         "text/html,application/xhtml+xml",
                 },
-            }
+            },
+            accessToken
         );
 
-
     if (
-        response.status === 401 ||
-        response.status === 403
+        isSessionExpiredResponse(
+            response
+        )
     ) {
         return false;
     }
-
 
     if (
         isRedirect(
             response.status
         )
     ) {
-        const location =
-            response.headers.get(
-                "location"
-            ) ?? "";
-
-
-        if (
-            location
-                .toLowerCase()
-                .includes(
-                    "/signin"
-                )
-        ) {
-            return false;
-        }
-
-
         throw new Error(
-            `Unexpected iJudge redirect: ` +
-            `${location}`
+            `Unexpected iJudge redirect: ${
+                response.headers.get(
+                    "location"
+                ) ??
+                "(missing location)"
+            }`
         );
     }
-
 
     if (!response.ok) {
         throw new Error(
-            `iJudge returned HTTP ` +
-            `${response.status} while checking the session.`
+            `iJudge returned HTTP ${response.status} while checking the session.`
         );
     }
-
 
     return true;
 }
@@ -200,35 +154,26 @@ export async function fetchRscPage(
     path: string,
     accessToken: string
 ): Promise<string> {
-    const separator =
-        path.includes("?")
-            ? "&"
-            : "?";
+    const pageUrl =
+        ijUrl(
+            path
+        );
 
+    const requestUrl =
+        new URL(
+            pageUrl
+        );
 
-    const rscKey =
-        createRscKey();
-
-
-    const url =
-        `${BASE_URL}${path}` +
-        `${separator}_rsc=${rscKey}`;
-
+    requestUrl.searchParams.set(
+        "_rsc",
+        createRscKey()
+    );
 
     const response =
-        await fetchWithTimeout(
-            url,
+        await fetchIJudge(
+            requestUrl.toString(),
             {
-                method:
-                    "GET",
-
-                redirect:
-                    "manual",
-
                 headers: {
-                    Cookie:
-                        `access_token=${accessToken}`,
-
                     Accept:
                         "text/x-component",
 
@@ -236,82 +181,37 @@ export async function fetchRscPage(
                         "1",
 
                     Referer:
-                        `${BASE_URL}/courses`,
+                        pageUrl,
                 },
-            }
+            },
+            accessToken
         );
 
-
-    checkAuthenticatedResponse(
+    assertAuthenticatedResponse(
         response
     );
 
-
     if (!response.ok) {
         throw new Error(
-            `iJudge returned HTTP ` +
-            `${response.status}.`
+            `iJudge returned HTTP ${response.status}.`
         );
     }
 
-
-    return response.text();
-}
-
-
-function checkAuthenticatedResponse(
-    response: Response
-): void {
-    if (
-        response.status === 401 ||
-        response.status === 403
-    ) {
-        throw new SessionExpiredError();
-    }
-
-
-    if (
-        !isRedirect(
-            response.status
-        )
-    ) {
-        return;
-    }
-
-
-    const location =
-        response.headers.get(
-            "location"
-        ) ?? "";
-
-
-    if (
-        location
-            .toLowerCase()
-            .includes(
-                "/signin"
-            )
-    ) {
-        throw new SessionExpiredError();
-    }
-
-
-    throw new Error(
-        `Unexpected iJudge redirect: ` +
-        `${location}`
+    return readTextLimited(
+        response,
+        MAX_RSC_BYTES,
+        "RSC response"
     );
 }
 
 
 function createRscKey():
     string {
-    const time =
+    return (
         Date.now()
             .toString(
                 36
-            );
-
-    const random =
+            ) +
         Math.random()
             .toString(
                 36
@@ -319,71 +219,6 @@ function createRscKey():
             .slice(
                 2,
                 8
-            );
-
-    return (
-        `${time}${random}`
-    );
-}
-
-
-async function fetchWithTimeout(
-    url: string,
-    options: RequestInit
-): Promise<Response> {
-    const controller =
-        new AbortController();
-
-
-    const timer =
-        setTimeout(
-            () => {
-                controller.abort();
-            },
-            REQUEST_TIMEOUT_MS
-        );
-
-
-    try {
-        return await fetch(
-            url,
-            {
-                ...options,
-
-                signal:
-                    controller.signal,
-            }
-        );
-    } catch (error) {
-        if (
-            error instanceof Error &&
-            error.name === "AbortError"
-        ) {
-            throw new Error(
-                "The iJudge request timed out."
-            );
-        }
-
-
-        throw new Error(
-            "Could not connect to iJudge."
-        );
-    } finally {
-        clearTimeout(
-            timer
-        );
-    }
-}
-
-
-function isRedirect(
-    status: number
-): boolean {
-    return (
-        status === 301 ||
-        status === 302 ||
-        status === 303 ||
-        status === 307 ||
-        status === 308
+            )
     );
 }

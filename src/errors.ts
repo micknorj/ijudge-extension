@@ -1,11 +1,8 @@
 export class SessionExpiredError extends Error {
     constructor(
-        message =
-            "Your iJudge session has expired."
+        message = "Your iJudge session has expired."
     ) {
         super(message);
-
-        this.name =
-            "SessionExpiredError";
+        this.name = "SessionExpiredError";
     }
 }

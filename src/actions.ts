@@ -1,26 +1,26 @@
-const BASE_URL =
-    "https://ijudge.it.kmitl.ac.th";
+import {
+    assertAuthenticatedResponse,
+    fetchIJudge,
+    IJUDGE_ORIGIN,
+    isRedirect,
+    readTextLimited,
+} from "./http";
 
-const REQUEST_TIMEOUT_MS =
-    15_000;
 
-
-/*
- * Compatibility fallbacks.
- *
- * iJudge currently uses Next.js Server Actions.
- * The extension attempts to discover the current
- * action IDs automatically from the live frontend.
- *
- * These known-good values are retained temporarily
- * as fallbacks in case discovery cannot identify
- * the current action.
- */
 const FALLBACK_LOGIN_ACTION =
     "7f71f9c659707739b0570d24aea95c12198cbf4c5c";
 
 const FALLBACK_SUBMIT_ACTION =
     "7fc32d2dd54d0b8574db835d9b74354be0cac2fbd7";
+
+const MAX_PAGE_BYTES =
+    4 * 1024 * 1024;
+
+const MAX_SCRIPT_BYTES =
+    6 * 1024 * 1024;
+
+const MAX_SCRIPTS =
+    40;
 
 
 type ActionKind =
@@ -34,30 +34,31 @@ interface ActionCandidate {
 }
 
 
-let cachedLoginAction:
-    string | undefined;
-
-let cachedSubmitAction:
-    string | undefined;
+const actionCache:
+    Partial<
+        Record<
+            ActionKind,
+            string
+        >
+    > = {};
 
 
 export async function getLoginAction():
     Promise<string> {
-    if (cachedLoginAction) {
-        return cachedLoginAction;
+    if (
+        actionCache.login
+    ) {
+        return actionCache.login;
     }
 
-    const discovered =
+    actionCache.login =
         await discoverAction(
             "login",
             "/signin"
-        );
-
-    cachedLoginAction =
-        discovered ??
+        ) ??
         FALLBACK_LOGIN_ACTION;
 
-    return cachedLoginAction;
+    return actionCache.login;
 }
 
 
@@ -65,35 +66,34 @@ export async function getSubmitAction(
     problemId: number,
     accessToken: string
 ): Promise<string> {
-    if (cachedSubmitAction) {
-        return cachedSubmitAction;
+    if (
+        actionCache.submit
+    ) {
+        return actionCache.submit;
     }
 
-    const discovered =
+    actionCache.submit =
         await discoverAction(
             "submit",
             `/problems/${problemId}/description?problemPage=0`,
             accessToken
-        );
-
-    cachedSubmitAction =
-        discovered ??
+        ) ??
         FALLBACK_SUBMIT_ACTION;
 
-    return cachedSubmitAction;
+    return actionCache.submit;
 }
 
 
 export function invalidateLoginAction():
     void {
-    cachedLoginAction =
+    actionCache.login =
         undefined;
 }
 
 
 export function invalidateSubmitAction():
     void {
-    cachedSubmitAction =
+    actionCache.submit =
         undefined;
 }
 
@@ -131,57 +131,64 @@ async function discoverAction(
         )
     );
 
-    const scriptUrls =
+    let best =
+        getBestCandidate(
+            candidates
+        );
+
+    if (
+        best &&
+        best.score >= 250
+    ) {
+        return best.id;
+    }
+
+    const scripts =
         extractScriptUrls(
             pageSource
-        );
-
-    scriptUrls.sort(
-        (a, b) =>
-            scriptPriority(
-                a,
-                kind
+        )
+            .sort(
+                (
+                    a,
+                    b
+                ) =>
+                    scriptPriority(
+                        a,
+                        kind
+                    ) -
+                    scriptPriority(
+                        b,
+                        kind
+                    )
             )
-            -
-            scriptPriority(
-                b,
-                kind
-            )
-    );
-
-    const scriptsToInspect =
-        scriptUrls.slice(
-            0,
-            60
-        );
+            .slice(
+                0,
+                MAX_SCRIPTS
+            );
 
     for (
-        const scriptUrl
-        of scriptsToInspect
+        const script
+        of scripts
     ) {
-        let source:
-            string;
-
         try {
-            source =
+            const source =
                 await fetchScript(
-                    scriptUrl,
-                    accessToken
+                    script
                 );
+
+            mergeCandidates(
+                candidates,
+                findActionCandidates(
+                    source,
+                    kind,
+                    script
+                )
+            );
         } catch {
             continue;
         }
 
-        mergeCandidates(
-            candidates,
-            findActionCandidates(
-                source,
-                kind,
-                scriptUrl
-            )
-        );
-
-        const best =
+        best =
             getBestCandidate(
                 candidates
             );
@@ -194,7 +201,7 @@ async function discoverAction(
         }
     }
 
-    const best =
+    best =
         getBestCandidate(
             candidates
         );
@@ -204,14 +211,11 @@ async function discoverAction(
     }
 
     if (
-        best.score >= 100
-    ) {
-        return best.id;
-    }
-
-    if (
-        candidates.size === 1 &&
-        best.score >= 60
+        best.score >= 100 ||
+        (
+            candidates.size === 1 &&
+            best.score >= 60
+        )
     ) {
         return best.id;
     }
@@ -224,34 +228,60 @@ async function fetchPageSource(
     pagePath: string,
     accessToken?: string
 ): Promise<string> {
-    const url =
-        new URL(
+    const response =
+        await fetchIJudge(
             pagePath,
-            BASE_URL
+            {
+                headers: {
+                    Accept:
+                        "text/html,application/xhtml+xml",
+                },
+            },
+            accessToken
         );
 
-    const headers:
-        Record<string, string> = {
-            Accept:
-                "text/html,application/xhtml+xml",
-        };
-
     if (accessToken) {
-        headers.Cookie =
-            `access_token=${accessToken}`;
+        assertAuthenticatedResponse(
+            response
+        );
+    } else if (
+        isRedirect(
+            response.status
+        )
+    ) {
+        throw new Error(
+            "Unexpected iJudge redirect."
+        );
     }
 
+    if (!response.ok) {
+        throw new Error(
+            `iJudge returned HTTP ${response.status}.`
+        );
+    }
+
+    return readTextLimited(
+        response,
+        MAX_PAGE_BYTES,
+        "page"
+    );
+}
+
+
+async function fetchScript(
+    scriptUrl: string
+): Promise<string> {
+    /*
+     * Static frontend JavaScript does not need the
+     * student's authentication cookie.
+     */
     const response =
-        await fetchWithTimeout(
-            url.toString(),
+        await fetchIJudge(
+            scriptUrl,
             {
-                method:
-                    "GET",
-
-                redirect:
-                    "manual",
-
-                headers,
+                headers: {
+                    Accept: "*/*",
+                },
             }
         );
 
@@ -260,92 +290,22 @@ async function fetchPageSource(
             response.status
         )
     ) {
-        const location =
-            response.headers.get(
-                "location"
-            ) ?? "";
-
-        if (
-            location
-                .toLowerCase()
-                .includes(
-                    "/signin"
-                )
-        ) {
-            throw new Error(
-                "Authentication required."
-            );
-        }
-
         throw new Error(
-            `Unexpected redirect: ${location}`
+            "Unexpected script redirect."
         );
     }
 
     if (!response.ok) {
         throw new Error(
-            `iJudge returned HTTP ${response.status}.`
+            `Script returned HTTP ${response.status}.`
         );
     }
 
-    return response.text();
-}
-
-
-async function fetchScript(
-    scriptUrl: string,
-    accessToken?: string
-): Promise<string> {
-    const url =
-        new URL(
-            scriptUrl
-        );
-
-    /*
-     * The iJudge access token must never be sent
-     * to another origin.
-     */
-    if (
-        url.origin !==
-        BASE_URL
-    ) {
-        throw new Error(
-            "External script origin refused."
-        );
-    }
-
-    const headers:
-        Record<string, string> = {
-            Accept:
-                "*/*",
-        };
-
-    if (accessToken) {
-        headers.Cookie =
-            `access_token=${accessToken}`;
-    }
-
-    const response =
-        await fetchWithTimeout(
-            url.toString(),
-            {
-                method:
-                    "GET",
-
-                redirect:
-                    "manual",
-
-                headers,
-            }
-        );
-
-    if (!response.ok) {
-        throw new Error(
-            `iJudge returned HTTP ${response.status}.`
-        );
-    }
-
-    return response.text();
+    return readTextLimited(
+        response,
+        MAX_SCRIPT_BYTES,
+        "script"
+    );
 }
 
 
@@ -355,57 +315,50 @@ function extractScriptUrls(
     const urls =
         new Set<string>();
 
-    /*
-     * Standard HTML script references.
-     */
-    const scriptTagPattern =
-        /<script\b[^>]*\bsrc=["']([^"']+\.js(?:\?[^"']*)?)["'][^>]*>/gi;
+    const patterns = [
+        /<script\b[^>]*\bsrc=["']([^"']+\.js(?:\?[^"']*)?)["'][^>]*>/gi,
+        /(?:\/_next\/)?static\/chunks\/[^"'\\\s<>]+?\.js/g,
+    ];
 
     for (
         const match
         of source.matchAll(
-            scriptTagPattern
+            patterns[0]
         )
     ) {
-        const normalized =
+        const url =
             normalizeScriptUrl(
                 match[1]
             );
 
-        if (normalized) {
+        if (url) {
             urls.add(
-                normalized
+                url
             );
         }
     }
-
-    /*
-     * Next.js serialized chunk references.
-     */
-    const chunkPattern =
-        /(?:\/_next\/)?static\/chunks\/[^"'\\\s<>]+?\.js/g;
 
     for (
         const match
         of source.matchAll(
-            chunkPattern
+            patterns[1]
         )
     ) {
-        const normalized =
+        const url =
             normalizeScriptUrl(
                 match[0]
             );
 
-        if (normalized) {
+        if (url) {
             urls.add(
-                normalized
+                url
             );
         }
     }
 
-    return Array.from(
-        urls
-    );
+    return [
+        ...urls,
+    ];
 }
 
 
@@ -415,18 +368,10 @@ function normalizeScriptUrl(
     let value =
         rawValue
             .replace(
-                /&amp;/g,
-                "&"
-            )
-            .replace(
-                /\\u0026/g,
+                /&amp;|\\u0026/g,
                 "&"
             )
             .trim();
-
-    if (!value) {
-        return undefined;
-    }
 
     if (
         value.startsWith(
@@ -455,17 +400,15 @@ function normalizeScriptUrl(
         const url =
             new URL(
                 value,
-                BASE_URL
+                IJUDGE_ORIGIN
             );
 
-        if (
-            url.origin !==
-            BASE_URL
-        ) {
-            return undefined;
-        }
-
-        return url.toString();
+        return (
+            url.origin ===
+            IJUDGE_ORIGIN
+        )
+            ? url.toString()
+            : undefined;
     } catch {
         return undefined;
     }
@@ -480,10 +423,6 @@ function findActionCandidates(
     const candidates:
         ActionCandidate[] = [];
 
-    /*
-     * Current Next.js Server Action IDs used by
-     * iJudge are 40 hexadecimal characters.
-     */
     const idPattern =
         /["']([0-9a-f]{40})["']/gi;
 
@@ -494,33 +433,24 @@ function findActionCandidates(
         )
     ) {
         if (
-            match.index === undefined
+            match.index ===
+            undefined
         ) {
             continue;
         }
 
-        const start =
-            Math.max(
-                0,
-                match.index - 700
-            );
-
-        const end =
-            Math.min(
-                source.length,
-                match.index + 700
-            );
-
         const context =
             source.slice(
-                start,
-                end
+                Math.max(
+                    0,
+                    match.index - 700
+                ),
+                Math.min(
+                    source.length,
+                    match.index + 700
+                )
             );
 
-        /*
-         * Ignore arbitrary SHA-like values unless they
-         * appear near Next.js Server Action machinery.
-         */
         if (
             !/createServerReference|registerServerReference|serverReference/i
                 .test(
@@ -530,85 +460,92 @@ function findActionCandidates(
             continue;
         }
 
-        let score =
-            60;
-
-        if (
-            isPageSpecificSource(
-                sourceName,
-                kind
-            )
-        ) {
-            score +=
-                40;
-        }
-
-        if (
-            kind === "submit"
-        ) {
-            if (
-                /submitCodeToServer/i
-                    .test(
-                        context
-                    )
-            ) {
-                score +=
-                    200;
-            } else if (
-                /submitCode/i
-                    .test(
-                        context
-                    )
-            ) {
-                score +=
-                    120;
-            } else if (
-                /\bsubmit\b|\bsubmission\b/i
-                    .test(
-                        context
-                    )
-            ) {
-                score +=
-                    40;
-            }
-        } else {
-            if (
-                /loginToServer|signInToServer|signinToServer/i
-                    .test(
-                        context
-                    )
-            ) {
-                score +=
-                    200;
-            } else if (
-                /loginAction|signInAction|signinAction|authenticateAction/i
-                    .test(
-                        context
-                    )
-            ) {
-                score +=
-                    160;
-            } else if (
-                /\bauthenticate\b|\bsignin\b|\bsignIn\b|\blogin\b/i
-                    .test(
-                        context
-                    )
-            ) {
-                score +=
-                    50;
-            }
-        }
-
         candidates.push({
             id:
                 match[1]
                     .toLowerCase(),
 
-            score,
+            score:
+                60 +
+                (
+                    isPageSpecificSource(
+                        sourceName,
+                        kind
+                    )
+                        ? 40
+                        : 0
+                ) +
+                semanticScore(
+                    context,
+                    kind
+                ),
         });
     }
 
     return candidates;
+}
+
+
+function semanticScore(
+    context: string,
+    kind: ActionKind
+): number {
+    if (
+        kind === "submit"
+    ) {
+        if (
+            /submitCodeToServer/i.test(
+                context
+            )
+        ) {
+            return 200;
+        }
+
+        if (
+            /submitCode/i.test(
+                context
+            )
+        ) {
+            return 120;
+        }
+
+        if (
+            /\bsubmit\b|\bsubmission\b/i.test(
+                context
+            )
+        ) {
+            return 40;
+        }
+
+        return 0;
+    }
+
+    if (
+        /loginToServer|signInToServer|signinToServer/i
+            .test(
+                context
+            )
+    ) {
+        return 200;
+    }
+
+    if (
+        /loginAction|signInAction|signinAction|authenticateAction/i
+            .test(
+                context
+            )
+    ) {
+        return 160;
+    }
+
+    return (
+        /\bauthenticate\b|\bsignin\b|\blogin\b/i
+            .test(
+                context
+            )
+    )
+        ? 50
+        : 0;
 }
 
 
@@ -651,33 +588,25 @@ function getBestCandidate(
             ActionCandidate
         >
 ): ActionCandidate | undefined {
-    let best:
-        ActionCandidate | undefined;
-
-    for (
-        const candidate
-        of candidates.values()
-    ) {
-        if (
-            !best ||
-            candidate.score >
-            best.score
-        ) {
-            best =
-                candidate;
-        }
-    }
-
-    return best;
+    return [
+        ...candidates.values(),
+    ].sort(
+        (
+            a,
+            b
+        ) =>
+            b.score -
+            a.score
+    )[0];
 }
 
 
 function scriptPriority(
-    url: string,
+    sourceName: string,
     kind: ActionKind
 ): number {
     return isPageSpecificSource(
-        url,
+        sourceName,
         kind
     )
         ? 0
@@ -689,88 +618,38 @@ function isPageSpecificSource(
     sourceName: string,
     kind: ActionKind
 ): boolean {
-    let decoded =
+    let source =
         sourceName;
 
     try {
-        decoded =
+        source =
             decodeURIComponent(
                 sourceName
             );
     } catch {
-        /*
-         * Keep original source name.
-         */
+        // Keep the original source name.
     }
 
-    const lower =
-        decoded.toLowerCase();
+    source =
+        source.toLowerCase();
 
-    if (
+    return (
         kind === "login"
-    ) {
-        return (
-            lower.includes(
+    )
+        ? (
+            source.includes(
                 "signin"
             ) ||
-            lower.includes(
+            source.includes(
                 "sign-in"
             )
-        );
-    }
-
-    return (
-        lower.includes(
-            "problems"
-        ) &&
-        lower.includes(
-            "description"
         )
-    );
-}
-
-
-async function fetchWithTimeout(
-    url: string,
-    options: RequestInit
-): Promise<Response> {
-    const controller =
-        new AbortController();
-
-    const timer =
-        setTimeout(
-            () => {
-                controller.abort();
-            },
-            REQUEST_TIMEOUT_MS
+        : (
+            source.includes(
+                "problems"
+            ) &&
+            source.includes(
+                "description"
+            )
         );
-
-    try {
-        return await fetch(
-            url,
-            {
-                ...options,
-
-                signal:
-                    controller.signal,
-            }
-        );
-    } finally {
-        clearTimeout(
-            timer
-        );
-    }
-}
-
-
-function isRedirect(
-    status: number
-): boolean {
-    return (
-        status === 301 ||
-        status === 302 ||
-        status === 303 ||
-        status === 307 ||
-        status === 308
-    );
 }

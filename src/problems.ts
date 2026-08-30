@@ -7,7 +7,7 @@ import {
 } from "./courses";
 
 
-const PROBLEM_CACHE_TTL_MS =
+const CACHE_TTL_MS =
     60_000;
 
 
@@ -22,7 +22,6 @@ export interface IJudgeProblem {
 
 
 export interface CourseProblems {
-    courseId: number;
     isExam: boolean;
     problems: IJudgeProblem[];
 }
@@ -34,79 +33,67 @@ export interface AssignmentMatch {
 }
 
 
-interface ProblemCacheEntry {
+interface CacheEntry {
     expiresAt: number;
-    courseProblems: CourseProblems;
+    data: CourseProblems;
 }
 
 
-const problemCache =
+const cache =
     new Map<
         number,
-        ProblemCacheEntry
+        CacheEntry
     >();
 
 
 export async function findAssignment(
     problemId: number,
     courses: IJudgeCourse[],
-    accessToken: string,
-    onStatus?: (
-        message: string
-    ) => void
+    accessToken: string
 ): Promise<AssignmentMatch | undefined> {
-    const candidates =
-        courses.filter(
-            (course) =>
-                !looksLikeExam(
-                    course.name
-                )
-        );
-
     for (
         const course
-        of candidates
+        of courses
     ) {
-        onStatus?.(
-            `Checking ${course.name}...`
-        );
+        if (
+            looksLikeExam(
+                course.name
+            )
+        ) {
+            continue;
+        }
 
-        const courseProblems =
+        const data =
             await getCourseProblems(
                 course.id,
                 accessToken
             );
 
         if (
-            courseProblems.isExam
+            data.isExam
         ) {
-            onStatus?.(
-                `Skipping exam course: ${course.name}`
-            );
-
             continue;
         }
 
         const problem =
-            courseProblems.problems.find(
+            data.problems.find(
                 (item) =>
-                    item.id === problemId
+                    item.id ===
+                    problemId
             );
 
-        if (!problem) {
-            continue;
+        if (problem) {
+            return {
+                course: {
+                    ...course,
+                },
+
+                problem:
+                    cloneProblem(
+                        problem
+                    ),
+            };
         }
-
-        return {
-            course: {
-                ...course,
-            },
-
-            problem:
-                cloneProblem(
-                    problem
-                ),
-        };
     }
 
     return undefined;
@@ -116,18 +103,13 @@ export async function findAssignment(
 export function validateAssignment(
     problem: IJudgeProblem
 ): string | undefined {
-    /*
-     * Exam-labelled problems may exist inside an
-     * otherwise normal course.
-     */
     if (
         looksLikeExam(
             problem.title
         )
     ) {
         return (
-            "Exam-labelled assignments are not " +
-            "supported by automatic submission."
+            "Exam-labelled assignments are not supported by automatic submission."
         );
     }
 
@@ -137,8 +119,7 @@ export function validateAssignment(
         "python"
     ) {
         return (
-            `This assignment requires ` +
-            `${problem.language}, not Python.`
+            `This assignment requires ${problem.language}, not Python.`
         );
     }
 
@@ -151,11 +132,11 @@ export function validateAssignment(
     }
 
     const now =
-        new Date();
+        Date.now();
 
     if (
         now <
-        problem.releaseTime
+        problem.releaseTime.getTime()
     ) {
         return (
             "This assignment has not been released yet."
@@ -164,7 +145,7 @@ export function validateAssignment(
 
     if (
         now >
-        problem.expireTime
+        problem.expireTime.getTime()
     ) {
         return (
             "This assignment is no longer accepting submissions."
@@ -177,84 +158,36 @@ export function validateAssignment(
 
 export function clearProblemCache():
     void {
-    problemCache.clear();
+    cache.clear();
 }
 
 
-async function getCourseProblems(
-    courseId: number,
-    accessToken: string
-): Promise<CourseProblems> {
-    const now =
-        Date.now();
-
-    const cached =
-        problemCache.get(
-            courseId
-        );
-
-    if (
-        cached &&
-        cached.expiresAt > now
-    ) {
-        return cloneCourseProblems(
-            cached.courseProblems
-        );
-    }
-
-    const response =
-        await fetchRscPage(
-            `/courses/${courseId}/problems`,
-            accessToken
-        );
-
-    const courseProblems =
-        parseCourseProblems(
-            response
-        );
-
-    problemCache.set(
-        courseId,
-        {
-            expiresAt:
-                now +
-                PROBLEM_CACHE_TTL_MS,
-
-            courseProblems:
-                cloneCourseProblems(
-                    courseProblems
-                ),
-        }
-    );
-
-    return cloneCourseProblems(
-        courseProblems
-    );
-}
-
-
-function parseCourseProblems(
-    response: string
+export function parseCourseProblemsResponse(
+    response: string,
+    expectedCourseId: number
 ): CourseProblems {
-    const normalized =
+    const source =
         response.replace(
             /\\"/g,
             '"'
         );
 
-    const courseIdMatch =
-        normalized.match(
-            /"courseId":(\d+)/
+    const courseId =
+        Number(
+            source.match(
+                /"courseId":(\d+)/
+            )?.[1]
         );
 
-    const isExamMatch =
-        normalized.match(
+    const examMatch =
+        source.match(
             /"isExam":(true|false)/
         );
 
     if (
-        !courseIdMatch ||
-        !isExamMatch
+        courseId !==
+            expectedCourseId ||
+        !examMatch
     ) {
         throw new Error(
             "Could not read the iJudge problem list."
@@ -264,13 +197,13 @@ function parseCourseProblems(
     const problems:
         IJudgeProblem[] = [];
 
-    const problemPattern =
-        /\{"cp_id":(\d+),"cp_problem_id":\d+,"cp_title":"((?:\\.|[^"\\])*)","cp_submission_limit":\d+,"cp_release_time":"([^"]+)","cp_expired_time":"([^"]+)","cp_lang_type":"([^"]+)".*?"cp_is_disable_submit":(\d+)/gs;
+    const pattern =
+        /\{"cp_id":(\d+),"cp_problem_id":\d+,"cp_title":"((?:\\.|[^"\\])*)","cp_submission_limit":\d+,"cp_release_time":"([^"]+)","cp_expired_time":"([^"]+)","cp_lang_type":"([^"]+)"[^{}]*?"cp_is_disable_submit":(\d+)/g;
 
     for (
         const match
-        of normalized.matchAll(
-            problemPattern
+        of source.matchAll(
+            pattern
         )
     ) {
         const id =
@@ -327,13 +260,8 @@ function parseCourseProblems(
     }
 
     return {
-        courseId:
-            Number(
-                courseIdMatch[1]
-            ),
-
         isExam:
-            isExamMatch[1] ===
+            examMatch[1] ===
             "true",
 
         problems,
@@ -341,18 +269,63 @@ function parseCourseProblems(
 }
 
 
+async function getCourseProblems(
+    courseId: number,
+    accessToken: string
+): Promise<CourseProblems> {
+    const cached =
+        cache.get(
+            courseId
+        );
+
+    if (
+        cached &&
+        cached.expiresAt >
+        Date.now()
+    ) {
+        return cloneCourseProblems(
+            cached.data
+        );
+    }
+
+    const data =
+        parseCourseProblemsResponse(
+            await fetchRscPage(
+                `/courses/${courseId}/problems`,
+                accessToken
+            ),
+            courseId
+        );
+
+    cache.set(
+        courseId,
+        {
+            expiresAt:
+                Date.now() +
+                CACHE_TTL_MS,
+
+            data:
+                cloneCourseProblems(
+                    data
+                ),
+        }
+    );
+
+    return cloneCourseProblems(
+        data
+    );
+}
+
+
 function cloneCourseProblems(
-    value: CourseProblems
+    data: CourseProblems
 ): CourseProblems {
     return {
-        courseId:
-            value.courseId,
-
         isExam:
-            value.isExam,
+            data.isExam,
 
         problems:
-            value.problems.map(
+            data.problems.map(
                 cloneProblem
             ),
     };

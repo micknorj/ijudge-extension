@@ -1,10 +1,6 @@
 export function detectProblemId(
     sourceCode: string
 ): number | undefined {
-    if (!sourceCode) {
-        return undefined;
-    }
-
     const firstLine =
         sourceCode
             .replace(
@@ -15,60 +11,35 @@ export function detectProblemId(
                 /\r?\n/,
                 1
             )[0]
-            .trim();
+            ?.trim();
 
     if (!firstLine) {
         return undefined;
     }
 
-    /*
-     * """3155"""
-     * '''3155'''
-     */
-    const tripleQuoteMatch =
+    const match =
         firstLine.match(
             /^(?:"""|''')\s*(\d+)\s*(?:"""|''')$/
-        );
-
-    if (tripleQuoteMatch) {
-        return toProblemId(
-            tripleQuoteMatch[1]
-        );
-    }
-
-    /*
-     * # 3155
-     * # ijudge: 3155
-     */
-    const commentMatch =
+        ) ??
         firstLine.match(
             /^#\s*(?:ijudge\s*:\s*)?(\d+)\s*$/i
         );
 
-    if (commentMatch) {
-        return toProblemId(
-            commentMatch[1]
-        );
-    }
-
-    return undefined;
-}
-
-
-function toProblemId(
-    value: string
-): number | undefined {
-    const problemId =
-        Number(value);
-
-    if (
-        !Number.isSafeInteger(
-            problemId
-        ) ||
-        problemId <= 0
-    ) {
+    if (!match) {
         return undefined;
     }
 
-    return problemId;
+    const id =
+        Number(
+            match[1]
+        );
+
+    return (
+        Number.isSafeInteger(
+            id
+        ) &&
+        id > 0
+    )
+        ? id
+        : undefined;
 }

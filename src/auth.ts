@@ -26,39 +26,32 @@ export async function ensureAuthenticated(
     secrets: vscode.SecretStorage,
     terminal: IJudgeTerminal
 ): Promise<string | undefined> {
-    const savedToken =
+    const token =
         await getAccessToken(
             secrets
         );
 
-    if (savedToken) {
+    if (token) {
         try {
-            const valid =
+            if (
                 await isSessionValid(
-                    savedToken
-                );
-
-            if (valid) {
-                return savedToken;
+                    token
+                )
+            ) {
+                return token;
             }
 
             await clearAuthentication(
                 secrets
             );
 
-            terminal.writeLine(
-                "Your iJudge session has expired."
-            );
-
-            terminal.writeLine(
+            terminal.writeLines(
+                "Your iJudge session has expired.",
                 "Login is required to continue."
             );
         } catch (error) {
-            terminal.writeLine(
-                "Could not verify the saved iJudge session."
-            );
-
-            terminal.writeLine(
+            terminal.writeLines(
+                "Could not verify the saved iJudge session.",
                 getErrorMessage(
                     error
                 )
@@ -67,30 +60,24 @@ export async function ensureAuthenticated(
             return undefined;
         }
     } else {
-        terminal.writeLine(
-            "You are not logged in to iJudge."
-        );
-
-        terminal.writeLine(
+        terminal.writeLines(
+            "You are not logged in to iJudge.",
             "Login is required to continue."
         );
     }
 
     terminal.writeLine();
 
-    const loggedIn =
+    return (
         await login(
             secrets,
             terminal
-        );
-
-    if (!loggedIn) {
-        return undefined;
-    }
-
-    return getAccessToken(
-        secrets
-    );
+        )
+    )
+        ? getAccessToken(
+            secrets
+        )
+        : undefined;
 }
 
 
@@ -100,21 +87,17 @@ export async function login(
 ): Promise<boolean> {
     terminal.show(false);
 
-    terminal.writeLine(
-        "iJudge Login"
-    );
-
-    terminal.writeLine(
+    terminal.writeLines(
+        "iJudge Login",
         "------------"
     );
 
-    const usernameInput =
-        await terminal.prompt(
-            "Username: "
-        );
-
     const username =
-        usernameInput?.trim();
+        (
+            await terminal.prompt(
+                "Username: "
+            )
+        )?.trim();
 
     if (!username) {
         terminal.writeLine(
@@ -138,9 +121,8 @@ export async function login(
         return false;
     }
 
-    terminal.writeLine();
-
-    terminal.writeLine(
+    terminal.writeLines(
+        "",
         "Signing in..."
     );
 
@@ -151,10 +133,6 @@ export async function login(
                 password
             );
 
-        /*
-         * Clear cached account metadata before the
-         * new session becomes active.
-         */
         clearRuntimeCaches();
 
         await secrets.store(
@@ -162,20 +140,17 @@ export async function login(
             result.accessToken
         );
 
-        terminal.writeLine(
-            "Login successful."
+        terminal.writeLines(
+            "Login successful.",
+            ""
         );
-
-        terminal.writeLine();
 
         return true;
     } catch (error) {
-        terminal.writeLine(
-            `Login failed: ` +
-            `${getErrorMessage(error)}`
+        terminal.writeLines(
+            `Login failed: ${getErrorMessage(error)}`,
+            ""
         );
-
-        terminal.writeLine();
 
         return false;
     }
@@ -192,17 +167,16 @@ export async function logout(
         secrets
     );
 
-    terminal.writeLine();
-
-    terminal.writeLine(
+    terminal.writeLines(
+        "",
         "Logged out."
     );
 }
 
 
-export async function getAccessToken(
+export function getAccessToken(
     secrets: vscode.SecretStorage
-): Promise<string | undefined> {
+): Thenable<string | undefined> {
     return secrets.get(
         ACCESS_TOKEN_KEY
     );
@@ -234,12 +208,11 @@ export async function checkLoginStatus(
     );
 
     try {
-        const valid =
+        if (
             await isSessionValid(
                 token
-            );
-
-        if (valid) {
+            )
+        ) {
             terminal.writeLine(
                 "Login status: Session is valid."
             );
@@ -256,10 +229,7 @@ export async function checkLoginStatus(
         );
     } catch (error) {
         terminal.writeLine(
-            "Could not check login status: " +
-            getErrorMessage(
-                error
-            )
+            `Could not check login status: ${getErrorMessage(error)}`
         );
     }
 }
@@ -286,13 +256,11 @@ function clearRuntimeCaches():
 function getErrorMessage(
     error: unknown
 ): string {
-    if (
+    return (
         error instanceof Error
-    ) {
-        return error.message;
-    }
-
-    return String(
-        error
-    );
+    )
+        ? error.message
+        : String(
+            error
+        );
 }

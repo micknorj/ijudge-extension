@@ -3,7 +3,7 @@ import {
 } from "./client";
 
 
-const COURSE_CACHE_TTL_MS =
+const CACHE_TTL_MS =
     60_000;
 
 
@@ -20,43 +20,38 @@ interface CourseCache {
 }
 
 
-let enrolledCourseCache:
+let cache:
     CourseCache | undefined;
 
 
 export async function getEnrolledCourses(
     accessToken: string
 ): Promise<IJudgeCourse[]> {
-    const now =
-        Date.now();
-
     if (
-        enrolledCourseCache &&
-        enrolledCourseCache.expiresAt > now
+        cache &&
+        cache.expiresAt >
+        Date.now()
     ) {
         return cloneCourses(
-            enrolledCourseCache.courses
+            cache.courses
         );
     }
 
-    const response =
-        await fetchRscPage(
-            "/courses",
-            accessToken
-        );
-
     const courses =
-        parseCourses(
-            response
+        parseCoursesResponse(
+            await fetchRscPage(
+                "/courses",
+                accessToken
+            )
         ).filter(
             (course) =>
                 course.enrolled
         );
 
-    enrolledCourseCache = {
+    cache = {
         expiresAt:
-            now +
-            COURSE_CACHE_TTL_MS,
+            Date.now() +
+            CACHE_TTL_MS,
 
         courses:
             cloneCourses(
@@ -72,14 +67,20 @@ export async function getEnrolledCourses(
 
 export function clearCourseCache():
     void {
-    enrolledCourseCache =
+    cache =
         undefined;
 }
 
 
-function parseCourses(
+export function parseCoursesResponse(
     response: string
 ): IJudgeCourse[] {
+    const source =
+        response.replace(
+            /\\"/g,
+            '"'
+        );
+
     const courses:
         IJudgeCourse[] = [];
 
@@ -88,7 +89,7 @@ function parseCourses(
 
     for (
         const match
-        of response.matchAll(
+        of source.matchAll(
             pattern
         )
     ) {
@@ -97,16 +98,10 @@ function parseCourses(
                 match[1]
             );
 
-        const name =
-            decodeJsonString(
-                match[2]
-            );
-
-        const enrolled =
-            match[3] ===
-            "true";
-
         if (
+            !Number.isSafeInteger(
+                id
+            ) ||
             courses.some(
                 (course) =>
                     course.id === id
@@ -117,38 +112,27 @@ function parseCourses(
 
         courses.push({
             id,
-            name,
-            enrolled,
+
+            name:
+                decodeJsonString(
+                    match[2]
+                ),
+
+            enrolled:
+                match[3] ===
+                "true",
         });
     }
 
     if (
-        courses.length > 0
+        courses.length === 0
     ) {
-        return courses;
-    }
-
-    /*
-     * RSC responses can contain JSON whose quotation
-     * marks are escaped inside another serialized layer.
-     */
-    const unescaped =
-        response.replace(
-            /\\"/g,
-            '"'
-        );
-
-    if (
-        unescaped !== response
-    ) {
-        return parseCourses(
-            unescaped
+        throw new Error(
+            "Could not read the iJudge course list."
         );
     }
 
-    throw new Error(
-        "Could not read the iJudge course list."
-    );
+    return courses;
 }
 
 

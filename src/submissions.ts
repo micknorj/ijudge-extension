@@ -7,9 +7,28 @@ import {
     SessionExpiredError,
 } from "./errors";
 
+import {
+    assertAuthenticatedResponse,
+    fetchIJudge,
+    readTextLimited,
+} from "./http";
 
-const BASE_URL =
-    "https://ijudge.it.kmitl.ac.th";
+import {
+    parseSubmissionResult,
+    SubmissionResult,
+} from "./submission-result";
+
+
+export {
+    averageExecutionMs,
+    calculateQualityPercent,
+    determineSubmissionStatus,
+    formatScore,
+    SubmissionResult,
+    testcaseResultName,
+    TestcaseResult,
+} from "./submission-result";
+
 
 const REQUEST_TIMEOUT_MS =
     30_000;
@@ -17,11 +36,17 @@ const REQUEST_TIMEOUT_MS =
 const POLL_INTERVAL_MS =
     1_000;
 
-const DEFAULT_POLL_TIMEOUT_MS =
+const POLL_TIMEOUT_MS =
     120_000;
 
-const MAX_CONSECUTIVE_POLL_FAILURES =
+const MAX_POLL_FAILURES =
     5;
+
+const MAX_SUBMIT_RESPONSE_BYTES =
+    1024 * 1024;
+
+const MAX_RESULT_RESPONSE_BYTES =
+    8 * 1024 * 1024;
 
 
 export interface SubmitSourceOptions {
@@ -30,23 +55,6 @@ export interface SubmitSourceOptions {
     language: string;
     code: string;
     accessToken: string;
-}
-
-
-export interface TestcaseResult {
-    testcaseId: number;
-    result: string;
-    execution: number | undefined;
-}
-
-
-export interface SubmissionResult {
-    submissionId: number;
-    result: string;
-    score: number;
-    createdAt: string;
-    qualityScore: number | undefined;
-    records: TestcaseResult[];
 }
 
 
@@ -61,44 +69,21 @@ export async function submitSource(
         accessToken,
     } = options;
 
+    const path =
+        `/problems/${problemId}/description?problemPage=0`;
 
-    const submitAction =
+    const action =
         await getSubmitAction(
             problemId,
             accessToken
         );
 
-
-    const url =
-        `${BASE_URL}/problems/` +
-        `${problemId}/description?problemPage=0`;
-
-
-    const payload = [
-        {
-            code,
-
-            lang_type:
-                language,
-
-            course_problem_id:
-                problemId,
-
-            course_id:
-                courseId,
-        },
-    ];
-
-
     const response =
-        await fetchWithTimeout(
-            url,
+        await fetchIJudge(
+            path,
             {
                 method:
                     "POST",
-
-                redirect:
-                    "manual",
 
                 headers: {
                     Accept:
@@ -108,85 +93,77 @@ export async function submitSource(
                         "text/plain;charset=UTF-8",
 
                     "Next-Action":
-                        submitAction,
+                        action,
 
                     Origin:
-                        BASE_URL,
+                        "https://ijudge.it.kmitl.ac.th",
 
                     Referer:
-                        url,
-
-                    Cookie:
-                        `access_token=${accessToken}`,
+                        `https://ijudge.it.kmitl.ac.th${path}`,
                 },
 
                 body:
                     JSON.stringify(
-                        payload
+                        [
+                            {
+                                code,
+
+                                lang_type:
+                                    language,
+
+                                course_problem_id:
+                                    problemId,
+
+                                course_id:
+                                    courseId,
+                            },
+                        ]
                     ),
-            }
+            },
+            accessToken,
+            REQUEST_TIMEOUT_MS
         );
 
-
-    checkSessionResponse(
+    assertAuthenticatedResponse(
         response
     );
-
 
     if (
         response.status !== 200
     ) {
-        /*
-         * Invalidate the action so the NEXT submission
-         * performs discovery again.
-         *
-         * Never automatically repeat an ambiguous POST.
-         */
-        if (
-            response.status === 400 ||
-            response.status === 404 ||
-            response.status >= 500
-        ) {
-            invalidateSubmitAction();
-        }
-
+        invalidateSubmitAction();
 
         throw new Error(
-            `iJudge returned HTTP ` +
-            `${response.status} while submitting.`
+            `iJudge returned HTTP ${response.status} while submitting.`
         );
     }
 
-
-    const responseText =
-        await response.text();
-
-
-    const success =
-        responseSaysSuccess(
-            responseText
+    const text =
+        await readTextLimited(
+            response,
+            MAX_SUBMIT_RESPONSE_BYTES,
+            "submission response"
         );
-
 
     const submissionId =
         getSubmissionId(
-            responseText
+            text
         );
 
-
     if (
-        !success ||
+        !/"success"\s*:\s*true/
+            .test(
+                text
+            ) ||
         submissionId === undefined
     ) {
         invalidateSubmitAction();
-
 
         throw new Error(
             "iJudge did not confirm the submission. " +
             "The submission interface may have changed."
         );
     }
-
 
     return submissionId;
 }
@@ -196,63 +173,42 @@ export async function fetchSubmissionResult(
     submissionId: number,
     accessToken: string
 ): Promise<SubmissionResult | undefined> {
-    const url =
-        `${BASE_URL}/submissions/` +
-        `${submissionId}/overview`;
-
-
     const response =
-        await fetchWithTimeout(
-            url,
+        await fetchIJudge(
+            `/submissions/${submissionId}/overview`,
             {
-                method:
-                    "GET",
-
-                redirect:
-                    "manual",
-
                 headers: {
                     Accept:
                         "text/html,application/xhtml+xml",
-
-                    Cookie:
-                        `access_token=${accessToken}`,
                 },
-            }
+            },
+            accessToken,
+            REQUEST_TIMEOUT_MS
         );
 
-
-    checkSessionResponse(
+    assertAuthenticatedResponse(
         response
     );
 
-
-    /*
-     * A newly-created submission may briefly be
-     * unavailable while the backend initializes it.
-     */
     if (
         response.status === 404
     ) {
         return undefined;
     }
 
-
     if (!response.ok) {
         throw new Error(
-            `iJudge returned HTTP ` +
-            `${response.status} while checking the result.`
+            `iJudge returned HTTP ${response.status} while checking the result.`
         );
     }
 
-
-    const responseText =
-        await response.text();
-
-
     return parseSubmissionResult(
         submissionId,
-        responseText
+        await readTextLimited(
+            response,
+            MAX_RESULT_RESPONSE_BYTES,
+            "submission result"
+        )
     );
 }
 
@@ -262,22 +218,17 @@ export async function waitForSubmission(
     accessToken: string,
     onWaiting?: () => void,
     timeoutMs =
-        DEFAULT_POLL_TIMEOUT_MS
+        POLL_TIMEOUT_MS
 ): Promise<SubmissionResult | undefined> {
     const started =
         Date.now();
 
-
-    let consecutiveFailures =
+    let failures =
         0;
 
-
-    let lastFailure:
-        unknown;
-
-
     while (
-        Date.now() - started <
+        Date.now() -
+            started <
         timeoutMs
     ) {
         try {
@@ -287,13 +238,8 @@ export async function waitForSubmission(
                     accessToken
                 );
 
-
-            consecutiveFailures =
+            failures =
                 0;
-
-            lastFailure =
-                undefined;
-
 
             if (result) {
                 return result;
@@ -306,671 +252,45 @@ export async function waitForSubmission(
                 throw error;
             }
 
+            failures++;
 
-            consecutiveFailures +=
-                1;
-
-            lastFailure =
-                error;
-
-
-            /*
-             * A temporary network failure should not
-             * immediately abandon an accepted submission.
-             *
-             * Persistent failures are surfaced instead of
-             * silently displaying "Judging" for 120 seconds.
-             */
             if (
-                consecutiveFailures >=
-                MAX_CONSECUTIVE_POLL_FAILURES
+                failures >=
+                MAX_POLL_FAILURES
             ) {
-                throw lastFailure;
+                throw error;
             }
         }
 
-
         onWaiting?.();
-
 
         await sleep(
             POLL_INTERVAL_MS
         );
     }
 
-
     return undefined;
 }
 
 
-export function determineSubmissionStatus(
-    result: SubmissionResult
-): "Passed" | "Not Passed" {
-    if (
-        result.records.length > 0 &&
-        result.records.every(
-            (record) =>
-                record.result === "P"
-        )
-    ) {
-        return "Passed";
-    }
-
-
-    return "Not Passed";
-}
-
-
-export function calculateQualityPercent(
-    qualityScore: number
-): number {
-    const raw =
-        (
-            (qualityScore + 10)
-            / 20
-        )
-        * 100;
-
-
-    return (
-        Math.round(
-            raw * 100
-        )
-        / 100
-    );
-}
-
-
-export function averageExecutionMs(
-    result: SubmissionResult
-): number | undefined {
-    if (
-        result.records.length === 0
-    ) {
-        return undefined;
-    }
-
-
-    const executions =
-        result.records
-            .map(
-                (record) =>
-                    record.execution
-            )
-            .filter(
-                (
-                    value
-                ): value is number =>
-                    value !== undefined
-            );
-
-
-    if (
-        executions.length === 0
-    ) {
-        return undefined;
-    }
-
-
-    const total =
-        executions.reduce(
-            (
-                sum,
-                execution
-            ) =>
-                sum +
-                execution,
-            0
-        );
-
-
-    return (
-        total /
-        executions.length *
-        1000
-    );
-}
-
-
-export function formatScore(
-    score: number
-): string {
-    return new Intl.NumberFormat(
-        "en-US",
-        {
-            useGrouping:
-                true,
-
-            maximumFractionDigits:
-                3,
-        }
-    ).format(
-        score
-    );
-}
-
-
-export function testcaseResultName(
-    code: string
-): string {
-    switch (code) {
-        case "P":
-            return "Passed";
-
-        case "-":
-            return "Incorrect";
-
-        case "T":
-            return "Timeout";
-
-        case "R":
-            return "Restrict/Require Word";
-
-        default:
-            return "Error";
-    }
-}
-
-
-function responseSaysSuccess(
-    responseText: string
-): boolean {
-    const compact =
-        responseText.replace(
-            /\s+/g,
-            ""
-        );
-
-
-    return compact.includes(
-        '"success":true'
-    );
-}
-
-
 function getSubmissionId(
-    responseText: string
+    text: string
 ): number | undefined {
-    const match =
-        responseText.match(
-            /"submissionId"\s*:\s*(\d+)/
-        );
-
-
-    if (!match) {
-        return undefined;
-    }
-
-
     const value =
         Number(
-            match[1]
+            text.match(
+                /"submissionId"\s*:\s*(\d+)/
+            )?.[1]
         );
 
-
-    if (
-        !Number.isSafeInteger(
-            value
-        ) ||
-        value <= 0
-    ) {
-        return undefined;
-    }
-
-
-    return value;
-}
-
-
-function parseSubmissionResult(
-    submissionId: number,
-    source: string
-): SubmissionResult | undefined {
-    /*
-     * Do not globally replace escaped quotes.
-     *
-     * Next.js can serialize the submission inside strings,
-     * while the submitted source code can itself contain
-     * escaped quotation marks.
-     *
-     * The parser therefore accepts both:
-     *
-     * "field"
-     *
-     * and:
-     *
-     * \"field\"
-     */
-
-    const submissionRegion =
-        findSubmissionRegion(
-            source,
-            submissionId
-        );
-
-
-    if (!submissionRegion) {
-        return undefined;
-    }
-
-
-    const resultString =
-        extractStringField(
-            submissionRegion,
-            "result"
-        );
-
-
-    if (!resultString) {
-        return undefined;
-    }
-
-
-    if (
-        resultString === "Judging"
-    ) {
-        return undefined;
-    }
-
-
-    const score =
-        extractNumberField(
-            submissionRegion,
-            "score"
-        );
-
-
-    if (
-        score === undefined
-    ) {
-        return undefined;
-    }
-
-
-    const createdAt =
-        extractStringField(
-            submissionRegion,
-            "created_at"
-        ) ?? "";
-
-
-    const qualityScore =
-        extractNumberField(
-            submissionRegion,
-            "pep8_score"
-        );
-
-
-    const records =
-        extractTestcaseRecords(
-            submissionRegion
-        );
-
-
-    /*
-     * Normal judged assignments are expected to have
-     * testcase records.
-     *
-     * Returning undefined here causes polling to continue
-     * briefly if the page is between judging states.
-     */
-    if (
-        records.length === 0
-    ) {
-        return undefined;
-    }
-
-
-    return {
-        submissionId,
-
-        result:
-            resultString,
-
-        score,
-
-        createdAt,
-
-        qualityScore,
-
-        records,
-    };
-}
-
-
-function findSubmissionRegion(
-    source: string,
-    submissionId: number
-): string | undefined {
-    /*
-     * \\?" means:
-     *
-     * optional backslash + quotation mark
-     *
-     * so both plain HTML JSON and escaped Next.js
-     * serialization are accepted.
-     */
-    const pattern =
-        new RegExp(
-            `\\\\?"cps_id\\\\?"` +
-            `\\s*:\\s*` +
-            `${submissionId}` +
-            `(?=\\s*[,}])`,
-            "g"
-        );
-
-
-    const match =
-        pattern.exec(
-            source
-        );
-
-
-    if (
-        !match ||
-        match.index === undefined
-    ) {
-        return undefined;
-    }
-
-
-    /*
-     * Everything relevant to this submission follows
-     * cps_id on the overview page.
-     *
-     * No destructive unescaping is performed.
-     */
-    return source.slice(
-        match.index
-    );
-}
-
-
-function extractTestcaseRecords(
-    source: string
-): TestcaseResult[] {
-    const records:
-        TestcaseResult[] = [];
-
-
-    const seenTestcases =
-        new Set<number>();
-
-
-    const pattern =
-        /\\?"testcase_id\\?"\s*:\s*(\d+)\s*,\s*\\?"result\\?"\s*:\s*\\?"([^"\\]*)\\?"\s*,\s*\\?"execution\\?"\s*:\s*(null|[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)/g;
-
-
-    for (
-        const match
-        of source.matchAll(
-            pattern
-        )
-    ) {
-        const testcaseId =
-            Number(
-                match[1]
-            );
-
-
-        if (
-            !Number.isSafeInteger(
-                testcaseId
-            ) ||
-            seenTestcases.has(
-                testcaseId
-            )
-        ) {
-            continue;
-        }
-
-
-        seenTestcases.add(
-            testcaseId
-        );
-
-
-        let execution:
-            number | undefined;
-
-
-        if (
-            match[3] !== "null"
-        ) {
-            const parsedExecution =
-                Number(
-                    match[3]
-                );
-
-
-            if (
-                Number.isFinite(
-                    parsedExecution
-                )
-            ) {
-                execution =
-                    parsedExecution;
-            }
-        }
-
-
-        records.push({
-            testcaseId,
-
-            result:
-                match[2],
-
-            execution,
-        });
-    }
-
-
-    records.sort(
-        (a, b) =>
-            a.testcaseId -
-            b.testcaseId
-    );
-
-
-    return records;
-}
-
-
-function extractStringField(
-    source: string,
-    field: string
-): string | undefined {
-    const escapedField =
-        escapeRegExp(
-            field
-        );
-
-
-    const pattern =
-        new RegExp(
-            `\\\\?"${escapedField}\\\\?"` +
-            `\\s*:\\s*` +
-            `\\\\?"([^"\\\\]*)\\\\?"`
-        );
-
-
-    const match =
-        source.match(
-            pattern
-        );
-
-
-    return match?.[1];
-}
-
-
-function extractNumberField(
-    source: string,
-    field: string
-): number | undefined {
-    const escapedField =
-        escapeRegExp(
-            field
-        );
-
-
-    const pattern =
-        new RegExp(
-            `\\\\?"${escapedField}\\\\?"` +
-            `\\s*:\\s*` +
-            `(null|` +
-            `[-+]?\\d+(?:\\.\\d+)?` +
-            `(?:[eE][-+]?\\d+)?` +
-            `)`
-        );
-
-
-    const match =
-        source.match(
-            pattern
-        );
-
-
-    if (
-        !match ||
-        match[1] === "null"
-    ) {
-        return undefined;
-    }
-
-
-    const value =
-        Number(
-            match[1]
-        );
-
-
-    if (
-        !Number.isFinite(
-            value
-        )
-    ) {
-        return undefined;
-    }
-
-
-    return value;
-}
-
-
-function checkSessionResponse(
-    response: Response
-): void {
-    if (
-        response.status === 401 ||
-        response.status === 403
-    ) {
-        throw new SessionExpiredError();
-    }
-
-
-    if (
-        !isRedirectStatus(
-            response.status
-        )
-    ) {
-        return;
-    }
-
-
-    const location =
-        response.headers.get(
-            "location"
-        ) ?? "";
-
-
-    if (
-        location
-            .toLowerCase()
-            .includes(
-                "/signin"
-            )
-    ) {
-        throw new SessionExpiredError();
-    }
-
-
-    throw new Error(
-        `Unexpected iJudge redirect: ` +
-        `${location}`
-    );
-}
-
-
-async function fetchWithTimeout(
-    url: string,
-    options: RequestInit
-): Promise<Response> {
-    const controller =
-        new AbortController();
-
-
-    const timer =
-        setTimeout(
-            () => {
-                controller.abort();
-            },
-            REQUEST_TIMEOUT_MS
-        );
-
-
-    try {
-        return await fetch(
-            url,
-            {
-                ...options,
-
-                signal:
-                    controller.signal,
-            }
-        );
-    } catch (error) {
-        if (
-            error instanceof Error &&
-            error.name === "AbortError"
-        ) {
-            throw new Error(
-                "The iJudge request timed out."
-            );
-        }
-
-
-        throw new Error(
-            "Could not connect to iJudge."
-        );
-    } finally {
-        clearTimeout(
-            timer
-        );
-    }
-}
-
-
-function isRedirectStatus(
-    status: number
-): boolean {
     return (
-        status === 301 ||
-        status === 302 ||
-        status === 303 ||
-        status === 307 ||
-        status === 308
-    );
-}
-
-
-function escapeRegExp(
-    value: string
-): string {
-    return value.replace(
-        /[.*+?^${}()|[\]\\]/g,
-        "\\$&"
-    );
+        Number.isSafeInteger(
+            value
+        ) &&
+        value > 0
+    )
+        ? value
+        : undefined;
 }
 
 
@@ -978,11 +298,10 @@ function sleep(
     milliseconds: number
 ): Promise<void> {
     return new Promise(
-        (resolve) => {
+        (resolve) =>
             setTimeout(
                 resolve,
                 milliseconds
-            );
-        }
+            )
     );
 }

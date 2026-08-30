@@ -42,17 +42,31 @@ import {
 } from "./terminal";
 
 
-const SUBMIT_COMMAND =
-    "micknorj.tools.ijudge.submit";
+const COMMANDS = {
+    submit:
+        "micknorj.tools.ijudge.submit",
 
-const LOGIN_COMMAND =
-    "micknorj.tools.ijudge.login";
+    login:
+        "micknorj.tools.ijudge.login",
 
-const LOGOUT_COMMAND =
-    "micknorj.tools.ijudge.logout";
+    logout:
+        "micknorj.tools.ijudge.logout",
 
-const LOGIN_STATUS_COMMAND =
-    "micknorj.tools.ijudge.loginStatus";
+    loginStatus:
+        "micknorj.tools.ijudge.loginStatus",
+};
+
+
+interface PreparedSource {
+    code: string;
+    problemId: number;
+}
+
+
+interface RetryResult<T> {
+    token: string;
+    value: T;
+}
 
 
 let submissionInProgress =
@@ -65,61 +79,44 @@ export function activate(
     const terminal =
         new IJudgeTerminal();
 
-
-    const submitCommand =
-        vscode.commands.registerCommand(
-            SUBMIT_COMMAND,
-            async () => {
-                await handleSubmit(
-                    context.secrets,
-                    terminal
-                );
-            }
-        );
-
-
-    const loginCommand =
-        vscode.commands.registerCommand(
-            LOGIN_COMMAND,
-            async () => {
-                await login(
-                    context.secrets,
-                    terminal
-                );
-            }
-        );
-
-
-    const logoutCommand =
-        vscode.commands.registerCommand(
-            LOGOUT_COMMAND,
-            async () => {
-                await logout(
-                    context.secrets,
-                    terminal
-                );
-            }
-        );
-
-
-    const loginStatusCommand =
-        vscode.commands.registerCommand(
-            LOGIN_STATUS_COMMAND,
-            async () => {
-                await checkLoginStatus(
-                    context.secrets,
-                    terminal
-                );
-            }
-        );
-
-
     context.subscriptions.push(
         terminal,
-        submitCommand,
-        loginCommand,
-        logoutCommand,
-        loginStatusCommand
+
+        vscode.commands.registerCommand(
+            COMMANDS.submit,
+            () =>
+                handleSubmit(
+                    context.secrets,
+                    terminal
+                )
+        ),
+
+        vscode.commands.registerCommand(
+            COMMANDS.login,
+            () =>
+                login(
+                    context.secrets,
+                    terminal
+                )
+        ),
+
+        vscode.commands.registerCommand(
+            COMMANDS.logout,
+            () =>
+                logout(
+                    context.secrets,
+                    terminal
+                )
+        ),
+
+        vscode.commands.registerCommand(
+            COMMANDS.loginStatus,
+            () =>
+                checkLoginStatus(
+                    context.secrets,
+                    terminal
+                )
+        )
     );
 }
 
@@ -132,19 +129,17 @@ async function handleSubmit(
         submissionInProgress
     ) {
         terminal.show(true);
-        terminal.writeLine();
 
-        terminal.writeLine(
+        terminal.writeLines(
+            "",
             "A submission is already in progress."
         );
 
         return;
     }
 
-
     submissionInProgress =
         true;
-
 
     try {
         await performSubmission(
@@ -153,13 +148,10 @@ async function handleSubmit(
         );
     } catch (error) {
         terminal.show(true);
-        terminal.writeLine();
 
-        terminal.writeLine(
-            "Unexpected extension error."
-        );
-
-        terminal.writeLine(
+        terminal.writeLines(
+            "",
+            "Unexpected extension error.",
             getErrorMessage(
                 error
             )
@@ -175,9 +167,289 @@ async function performSubmission(
     secrets: vscode.SecretStorage,
     terminal: IJudgeTerminal
 ): Promise<void> {
+    const source =
+        await prepareSource(
+            terminal
+        );
+
+    if (!source) {
+        return;
+    }
+
+    terminal.show(true);
+    terminal.writeLine();
+
+    let token =
+        await ensureAuthenticated(
+            secrets,
+            terminal
+        );
+
+    if (!token) {
+        terminal.writeLine(
+            "Submission cancelled."
+        );
+
+        return;
+    }
+
+    terminal.writeLine(
+        "Finding assignment..."
+    );
+
+    let discovery:
+        RetryResult<
+            AssignmentMatch |
+            undefined
+        > |
+        undefined;
+
+    try {
+        discovery =
+            await runWithReauthentication(
+                token,
+                (
+                    currentToken
+                ) =>
+                    discoverAssignment(
+                        source.problemId,
+                        currentToken
+                    ),
+                secrets,
+                terminal,
+                {
+                    expiredMessage:
+                        "Session expired while finding the assignment.",
+
+                    onResume:
+                        () =>
+                            terminal.writeLine(
+                                "Resuming assignment discovery..."
+                            ),
+                }
+            );
+    } catch (error) {
+        printError(
+            terminal,
+            "Could not discover the assignment.",
+            error
+        );
+
+        return;
+    }
+
+    if (!discovery) {
+        terminal.writeLine(
+            "Submission cancelled."
+        );
+
+        return;
+    }
+
+    token =
+        discovery.token;
+
+    const assignment =
+        discovery.value;
+
+    if (!assignment) {
+        terminal.writeLines(
+            "",
+            `Problem ${source.problemId} was not found in any available enrolled course.`
+        );
+
+        return;
+    }
+
+    printAssignment(
+        terminal,
+        assignment
+    );
+
+    const validationError =
+        validateAssignment(
+            assignment.problem
+        );
+
+    if (validationError) {
+        terminal.writeLines(
+            "Status:   Unavailable",
+            "",
+            validationError
+        );
+
+        return;
+    }
+
+    terminal.writeLines(
+        "Status:   Available",
+        "",
+        "Submitting..."
+    );
+
+    let submission:
+        RetryResult<number> |
+        undefined;
+
+    try {
+        submission =
+            await runWithReauthentication(
+                token,
+                (
+                    currentToken
+                ) =>
+                    submitSource({
+                        problemId:
+                            assignment.problem.id,
+
+                        courseId:
+                            assignment.course.id,
+
+                        language:
+                            assignment.problem.language,
+
+                        code:
+                            source.code,
+
+                        accessToken:
+                            currentToken,
+                    }),
+                secrets,
+                terminal,
+                {
+                    expiredMessage:
+                        "Session expired.",
+
+                    onResume:
+                        () =>
+                            terminal.writeLine(
+                                "Resuming submission..."
+                            ),
+                }
+            );
+    } catch (error) {
+        printError(
+            terminal,
+            "Submission failed.",
+            error
+        );
+
+        return;
+    }
+
+    if (!submission) {
+        terminal.writeLine(
+            "Submission cancelled."
+        );
+
+        return;
+    }
+
+    token =
+        submission.token;
+
+    const submissionId =
+        submission.value;
+
+    terminal.writeLines(
+        `Submission ID: ${submissionId}`,
+        ""
+    );
+
+    terminal.write(
+        "Judging"
+    );
+
+    let judging:
+        RetryResult<
+            SubmissionResult |
+            undefined
+        > |
+        undefined;
+
+    try {
+        judging =
+            await runWithReauthentication(
+                token,
+                (
+                    currentToken
+                ) =>
+                    waitForSubmission(
+                        submissionId,
+                        currentToken,
+                        () =>
+                            terminal.write(
+                                "."
+                            )
+                    ),
+                secrets,
+                terminal,
+                {
+                    expiredMessage:
+                        "Session expired while waiting for the result.",
+
+                    beforeMessage:
+                        () =>
+                            terminal.writeLines(
+                                "",
+                                ""
+                            ),
+
+                    onResume:
+                        () =>
+                            terminal.write(
+                                "Judging"
+                            ),
+                }
+            );
+    } catch (error) {
+        terminal.writeLine();
+
+        printError(
+            terminal,
+            "Could not retrieve the submission result.",
+            error
+        );
+
+        return;
+    }
+
+    terminal.writeLine();
+
+    if (!judging) {
+        terminal.writeLines(
+            "",
+            "Stopped waiting.",
+            `Submission ${submissionId} was not cancelled.`
+        );
+
+        return;
+    }
+
+    if (!judging.value) {
+        terminal.writeLines(
+            "",
+            "Still judging.",
+            "Stopped waiting after 120 seconds.",
+            `Submission ID: ${submissionId}`,
+            "The submission was not cancelled."
+        );
+
+        return;
+    }
+
+    printSubmissionResult(
+        terminal,
+        judging.value
+    );
+}
+
+
+async function prepareSource(
+    terminal: IJudgeTerminal
+): Promise<PreparedSource | undefined> {
     const editor =
         vscode.window.activeTextEditor;
-
 
     if (!editor) {
         showTerminalError(
@@ -185,13 +457,11 @@ async function performSubmission(
             "No active file is open."
         );
 
-        return;
+        return undefined;
     }
-
 
     const document =
         editor.document;
-
 
     if (
         document.languageId !==
@@ -202,9 +472,8 @@ async function performSubmission(
             "The active file is not Python."
         );
 
-        return;
+        return undefined;
     }
-
 
     if (
         document.isUntitled
@@ -214,507 +483,54 @@ async function performSubmission(
             "Save the file before submitting."
         );
 
-        return;
+        return undefined;
     }
 
-
-    const saved =
-        await document.save();
-
-
-    if (!saved) {
+    if (
+        !await document.save()
+    ) {
         showTerminalError(
             terminal,
             "Could not save the active file."
         );
 
-        return;
+        return undefined;
     }
-
 
     const code =
         document.getText();
 
-
-    if (
-        !code.trim()
-    ) {
+    if (!code.trim()) {
         showTerminalError(
             terminal,
             "The active file is empty."
         );
 
-        return;
+        return undefined;
     }
-
 
     const problemId =
         detectProblemId(
             code
         );
 
-
     if (!problemId) {
-        terminal.show(true);
-        terminal.writeLine();
-
-        terminal.writeLine(
-            "Error: No iJudge problem ID found."
+        showTerminalError(
+            terminal,
+            "No iJudge problem ID found."
         );
 
         terminal.writeLine(
             'Use """3155""", # 3155, or # ijudge: 3155.'
         );
 
-        return;
+        return undefined;
     }
 
-
-    terminal.show(true);
-    terminal.writeLine();
-
-
-    let accessToken =
-        await ensureAuthenticated(
-            secrets,
-            terminal
-        );
-
-
-    if (!accessToken) {
-        terminal.writeLine(
-            "Submission cancelled."
-        );
-
-        return;
-    }
-
-
-    /*
-     * ===================================================
-     * Assignment discovery
-     * ===================================================
-     */
-
-    terminal.writeLine(
-        "Finding assignment..."
-    );
-
-
-    let assignment:
-        AssignmentMatch | undefined;
-
-
-    try {
-        assignment =
-            await discoverAssignment(
-                problemId,
-                accessToken
-            );
-    } catch (error) {
-        if (
-            error instanceof
-            SessionExpiredError
-        ) {
-            terminal.writeLine(
-                "Session expired while finding the assignment."
-            );
-
-            terminal.writeLine(
-                "Login is required to continue."
-            );
-
-            terminal.writeLine();
-
-
-            const newToken =
-                await reauthenticate(
-                    secrets,
-                    terminal
-                );
-
-
-            if (!newToken) {
-                terminal.writeLine(
-                    "Submission cancelled."
-                );
-
-                return;
-            }
-
-
-            accessToken =
-                newToken;
-
-
-            terminal.writeLine(
-                "Resuming assignment discovery..."
-            );
-
-
-            try {
-                assignment =
-                    await discoverAssignment(
-                        problemId,
-                        accessToken
-                    );
-            } catch (
-                retryError
-            ) {
-                printDiscoveryError(
-                    terminal,
-                    retryError
-                );
-
-                return;
-            }
-        } else {
-            printDiscoveryError(
-                terminal,
-                error
-            );
-
-            return;
-        }
-    }
-
-
-    if (!assignment) {
-        terminal.writeLine();
-
-        terminal.writeLine(
-            `Problem ${problemId} was not found ` +
-            "in any available enrolled course."
-        );
-
-        return;
-    }
-
-
-    /*
-     * ===================================================
-     * Assignment validation
-     * ===================================================
-     */
-
-    const validationError =
-        validateAssignment(
-            assignment.problem
-        );
-
-
-    terminal.writeLine();
-
-
-    terminal.writeLine(
-        `Problem:  ` +
-        `${assignment.problem.id} - ` +
-        `${assignment.problem.title}`
-    );
-
-
-    terminal.writeLine(
-        `Course:   ` +
-        `${assignment.course.name}`
-    );
-
-
-    terminal.writeLine(
-        `Language: ` +
-        `${assignment.problem.language}`
-    );
-
-
-    if (
-        validationError
-    ) {
-        terminal.writeLine(
-            "Status:   Unavailable"
-        );
-
-        terminal.writeLine();
-
-        terminal.writeLine(
-            validationError
-        );
-
-        return;
-    }
-
-
-    terminal.writeLine(
-        "Status:   Available"
-    );
-
-
-    /*
-     * ===================================================
-     * Submit
-     * ===================================================
-     */
-
-    terminal.writeLine();
-
-    terminal.writeLine(
-        "Submitting..."
-    );
-
-
-    let submissionId:
-        number;
-
-
-    try {
-        submissionId =
-            await submitSource({
-                problemId:
-                    assignment.problem.id,
-
-                courseId:
-                    assignment.course.id,
-
-                language:
-                    assignment.problem.language,
-
-                code,
-
-                accessToken,
-            });
-    } catch (error) {
-        /*
-         * Only repeat the POST after an explicit
-         * authentication failure.
-         *
-         * Ambiguous failures are never retried because
-         * the original submission may have succeeded.
-         */
-        if (
-            error instanceof
-            SessionExpiredError
-        ) {
-            terminal.writeLine(
-                "Session expired."
-            );
-
-            terminal.writeLine(
-                "Login is required to continue."
-            );
-
-            terminal.writeLine();
-
-
-            const newToken =
-                await reauthenticate(
-                    secrets,
-                    terminal
-                );
-
-
-            if (!newToken) {
-                terminal.writeLine(
-                    "Submission cancelled."
-                );
-
-                return;
-            }
-
-
-            accessToken =
-                newToken;
-
-
-            terminal.writeLine(
-                "Resuming submission..."
-            );
-
-
-            try {
-                submissionId =
-                    await submitSource({
-                        problemId:
-                            assignment.problem.id,
-
-                        courseId:
-                            assignment.course.id,
-
-                        language:
-                            assignment.problem.language,
-
-                        code,
-
-                        accessToken,
-                    });
-            } catch (
-                retryError
-            ) {
-                printSubmissionError(
-                    terminal,
-                    retryError
-                );
-
-                return;
-            }
-        } else {
-            printSubmissionError(
-                terminal,
-                error
-            );
-
-            return;
-        }
-    }
-
-
-    terminal.writeLine(
-        `Submission ID: ${submissionId}`
-    );
-
-
-    /*
-     * ===================================================
-     * Judging
-     * ===================================================
-     */
-
-    terminal.writeLine();
-
-    terminal.write(
-        "Judging"
-    );
-
-
-    let result:
-        SubmissionResult | undefined;
-
-
-    try {
-        result =
-            await waitForSubmission(
-                submissionId,
-                accessToken,
-                () => {
-                    terminal.write(
-                        "."
-                    );
-                }
-            );
-    } catch (error) {
-        if (
-            error instanceof
-            SessionExpiredError
-        ) {
-            terminal.writeLine();
-            terminal.writeLine();
-
-            terminal.writeLine(
-                "Session expired while waiting for the result."
-            );
-
-            terminal.writeLine(
-                "Login is required to continue."
-            );
-
-            terminal.writeLine();
-
-
-            const newToken =
-                await reauthenticate(
-                    secrets,
-                    terminal
-                );
-
-
-            if (!newToken) {
-                terminal.writeLine(
-                    "Stopped waiting."
-                );
-
-                terminal.writeLine(
-                    `Submission ${submissionId} ` +
-                    "was not cancelled."
-                );
-
-                return;
-            }
-
-
-            accessToken =
-                newToken;
-
-
-            terminal.write(
-                "Judging"
-            );
-
-
-            try {
-                result =
-                    await waitForSubmission(
-                        submissionId,
-                        accessToken,
-                        () => {
-                            terminal.write(
-                                "."
-                            );
-                        }
-                    );
-            } catch (
-                retryError
-            ) {
-                printResultError(
-                    terminal,
-                    retryError
-                );
-
-                return;
-            }
-        } else {
-            printResultError(
-                terminal,
-                error
-            );
-
-            return;
-        }
-    }
-
-
-    terminal.writeLine();
-
-
-    /*
-     * ===================================================
-     * Poll timeout
-     * ===================================================
-     */
-
-    if (!result) {
-        terminal.writeLine();
-
-        terminal.writeLine(
-            "Still judging."
-        );
-
-        terminal.writeLine(
-            "Stopped waiting after 120 seconds."
-        );
-
-        terminal.writeLine(
-            `Submission ID: ${submissionId}`
-        );
-
-        terminal.writeLine(
-            "The submission was not cancelled."
-        );
-
-        return;
-    }
-
-
-    printSubmissionResult(
-        terminal,
-        result
-    );
+    return {
+        code,
+        problemId,
+    };
 }
 
 
@@ -727,7 +543,6 @@ async function discoverAssignment(
             accessToken
         );
 
-
     if (
         courses.length === 0
     ) {
@@ -735,7 +550,6 @@ async function discoverAssignment(
             "No enrolled iJudge courses were found."
         );
     }
-
 
     return findAssignment(
         problemId,
@@ -745,79 +559,96 @@ async function discoverAssignment(
 }
 
 
-async function reauthenticate(
+async function runWithReauthentication<T>(
+    accessToken: string,
+    operation:
+        (
+            token: string
+        ) => Promise<T>,
     secrets: vscode.SecretStorage,
-    terminal: IJudgeTerminal
-): Promise<string | undefined> {
-    const loggedIn =
-        await login(
+    terminal: IJudgeTerminal,
+    options: {
+        expiredMessage: string;
+        beforeMessage?: () => void;
+        onResume?: () => void;
+    }
+): Promise<RetryResult<T> | undefined> {
+    try {
+        return {
+            token:
+                accessToken,
+
+            value:
+                await operation(
+                    accessToken
+                ),
+        };
+    } catch (error) {
+        if (
+            !(error instanceof
+                SessionExpiredError)
+        ) {
+            throw error;
+        }
+    }
+
+    options.beforeMessage?.();
+
+    terminal.writeLines(
+        options.expiredMessage,
+        "Login is required to continue.",
+        ""
+    );
+
+    const token =
+        await reauthenticate(
             secrets,
             terminal
         );
 
-
-    if (!loggedIn) {
+    if (!token) {
         return undefined;
     }
 
+    options.onResume?.();
 
-    return getAccessToken(
-        secrets
-    );
+    return {
+        token,
+
+        value:
+            await operation(
+                token
+            ),
+    };
 }
 
 
-function printDiscoveryError(
-    terminal: IJudgeTerminal,
-    error: unknown
-): void {
-    terminal.writeLine();
-
-    terminal.writeLine(
-        "Could not discover the assignment."
-    );
-
-    terminal.writeLine(
-        getErrorMessage(
-            error
+async function reauthenticate(
+    secrets: vscode.SecretStorage,
+    terminal: IJudgeTerminal
+): Promise<string | undefined> {
+    return (
+        await login(
+            secrets,
+            terminal
         )
-    );
+    )
+        ? getAccessToken(
+            secrets
+        )
+        : undefined;
 }
 
 
-function printSubmissionError(
+function printAssignment(
     terminal: IJudgeTerminal,
-    error: unknown
+    assignment: AssignmentMatch
 ): void {
-    terminal.writeLine();
-
-    terminal.writeLine(
-        "Submission failed."
-    );
-
-    terminal.writeLine(
-        getErrorMessage(
-            error
-        )
-    );
-}
-
-
-function printResultError(
-    terminal: IJudgeTerminal,
-    error: unknown
-): void {
-    terminal.writeLine();
-    terminal.writeLine();
-
-    terminal.writeLine(
-        "Could not retrieve the submission result."
-    );
-
-    terminal.writeLine(
-        getErrorMessage(
-            error
-        )
+    terminal.writeLines(
+        "",
+        `Problem:  ${assignment.problem.id} - ${assignment.problem.title}`,
+        `Course:   ${assignment.course.name}`,
+        `Language: ${assignment.problem.language}`
     );
 }
 
@@ -831,113 +662,102 @@ function printSubmissionResult(
             result
         );
 
-
-    const passedCount =
+    const passed =
         result.records.filter(
-            (record) =>
+            (
+                record
+            ) =>
                 record.result === "P"
         ).length;
 
-
-    const averageMs =
+    const average =
         averageExecutionMs(
             result
         );
 
-
-    terminal.writeLine();
-
-    terminal.writeLine(
-        status
+    terminal.writeLines(
+        "",
+        status,
+        "",
+        `Testcases:         ${passed}/${result.records.length} passed`,
+        `Score:             ${formatScore(result.score)}`
     );
-
-    terminal.writeLine();
-
-
-    terminal.writeLine(
-        `Testcases:         ` +
-        `${passedCount}/${result.records.length} passed`
-    );
-
-
-    terminal.writeLine(
-        `Score:             ` +
-        `${formatScore(result.score)}`
-    );
-
 
     if (
         result.qualityScore !==
         undefined
     ) {
-        const quality =
-            calculateQualityPercent(
-                result.qualityScore
-            );
-
-
         terminal.writeLine(
-            `Quality:           ` +
-            `${quality.toFixed(2)}%`
+            `Quality:           ${
+                calculateQualityPercent(
+                    result.qualityScore
+                ).toFixed(
+                    2
+                )
+            }%`
         );
     }
-
 
     if (
-        averageMs !==
-        undefined
+        average !== undefined
     ) {
         terminal.writeLine(
-            `Average execution: ` +
-            `${averageMs.toFixed(2)} ms`
+            `Average execution: ${average.toFixed(2)} ms`
         );
     }
-
 
     if (
         status !== "Passed"
     ) {
         terminal.writeLine(
-            `Result code:       ` +
-            `${result.result}`
+            `Result code:       ${result.result}`
         );
     }
 
-
-    terminal.writeLine();
-
-    terminal.writeLine(
+    terminal.writeLines(
+        "",
         "Test cases:"
     );
-
 
     result.records.forEach(
         (
             record,
             index
-        ) => {
-            const number =
-                String(
-                    index + 1
-                ).padStart(
-                    2,
-                    " "
-                );
-
-
+        ) =>
             terminal.writeLine(
-                `${number}  ` +
-                `${testcaseResultName(record.result)}`
-            );
-        }
+                `${
+                    String(
+                        index + 1
+                    ).padStart(
+                        2,
+                        " "
+                    )
+                }  ${
+                    testcaseResultName(
+                        record.result
+                    )
+                }`
+            )
     );
 
+    terminal.writeLines(
+        "",
+        `Submission ID: ${result.submissionId}`
+    );
+}
 
-    terminal.writeLine();
 
-    terminal.writeLine(
-        `Submission ID: ` +
-        `${result.submissionId}`
+function printError(
+    terminal: IJudgeTerminal,
+    heading: string,
+    error: unknown
+): void {
+    terminal.writeLines(
+        "",
+        heading,
+        getErrorMessage(
+            error
+        )
     );
 }
 
@@ -948,9 +768,8 @@ function showTerminalError(
 ): void {
     terminal.show(true);
 
-    terminal.writeLine();
-
-    terminal.writeLine(
+    terminal.writeLines(
+        "",
         `Error: ${message}`
     );
 }
@@ -959,19 +778,11 @@ function showTerminalError(
 function getErrorMessage(
     error: unknown
 ): string {
-    if (
+    return (
         error instanceof Error
-    ) {
-        return error.message;
-    }
-
-
-    return String(
-        error
-    );
-}
-
-
-export function deactivate(): void {
-    // Resources are disposed through context.subscriptions.
+    )
+        ? error.message
+        : String(
+            error
+        );
 }
