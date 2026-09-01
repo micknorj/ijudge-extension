@@ -2,7 +2,7 @@
 
 All notable changes to the iJudge Extension, part of **Mick's Tools**, will be documented in this file.
 
-## 0.7.0 - Unreleased
+## 0.7.0 - 2026-09-02
 
 Compatibility and protocol-resilience development release.
 
