@@ -1,0 +1,15 @@
+src/**
+tests/**
+.vscode/**
+tsconfig.json
+SECURITY.md
+.git/**
+.github/**
+.gitignore
+node_modules/**
+package-lock.json
+**/*.map
+*.vsix
+*.log
+npm-debug.log*
+*.zip

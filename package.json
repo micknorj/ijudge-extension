@@ -1,0 +1,78 @@
+{
+  "name": "tools-ijudge",
+  "displayName": "iJudge Extension",
+  "description": "An unofficial KMITL iJudge assignment submission extension for VS Code and VSCodium. Part of Mick's Tools.",
+  "version": "0.7.0",
+  "publisher": "micknorj",
+  "author": "micknorj",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/micknorj/ijudge-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/micknorj/ijudge-extension/issues"
+  },
+  "homepage": "https://github.com/micknorj/ijudge-extension#readme",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ijudge",
+    "kmitl",
+    "programming",
+    "submission",
+    "python",
+    "micks-tools"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "micknorj.tools.ijudge.submit",
+        "title": "Submit to iJudge",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "micknorj.tools.ijudge.login",
+        "title": "iJudge: Login"
+      },
+      {
+        "command": "micknorj.tools.ijudge.logout",
+        "title": "iJudge: Logout"
+      },
+      {
+        "command": "micknorj.tools.ijudge.loginStatus",
+        "title": "iJudge: Show Login Status"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "micknorj.tools.ijudge.submit",
+          "when": "editorLangId == python && resourceScheme == file",
+          "group": "navigation@10"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test tests/*.test.cjs",
+    "test:security": "npm run compile && node --test tests/http.test.cjs",
+    "test:compatibility": "npm run compile && node --test tests/compatibility-0.7.test.cjs",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package",
+    "package:list": "vsce ls --tree"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^5.0.0"
+  }
+}
