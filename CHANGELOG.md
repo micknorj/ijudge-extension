@@ -2,6 +2,62 @@
 
 All notable changes to the iJudge Extension, part of **Mick's Tools**, will be documented in this file.
 
+## 0.8.0 - 2026-09-05
+
+Compatibility-safety and diagnostics development release.
+
+### Compatibility
+
+- Added cross-source Server Action consistency validation
+- Server Action references are now evaluated across the inspected page and same-origin frontend JavaScript assets before an action is selected
+- Repeated identical Server Action references remain valid
+- Conflicting identifiers for the same semantic action are rejected
+- Incomplete Server Action discovery now fails closed instead of selecting an action from partial information
+- Preserved opaque Server Action identifier handling
+- Preserved semantic action discovery for `signIn`
+- Preserved semantic action discovery for `submitCodeToServer`
+- Preserved normal authenticated HTML course/problem discovery
+
+### Diagnostics
+
+- Added dedicated iJudge compatibility errors
+- Added explicit diagnostics for missing Server Actions
+- Added explicit diagnostics for conflicting Server Actions
+- Added explicit diagnostics for incomplete Server Action discovery
+- Added explicit diagnostics for unrecognized course data
+- Added explicit diagnostics for unrecognized problem data
+- Login now presents frontend compatibility failures separately from ordinary authentication failures
+- Assignment discovery and submission now present frontend compatibility failures separately from ordinary runtime failures
+- Compatibility diagnostics do not expose runtime Server Action identifiers or authentication material
+
+### Security
+
+- Server Action selection now fails closed when frontend references conflict
+- Server Action selection now fails closed when the frontend cannot be inspected completely
+- Preserved same-origin restrictions for iJudge requests
+- Preserved unauthenticated static frontend JavaScript requests
+- Preserved in-memory-only Server Action caching
+- Preserved protection against retrying ambiguous source submissions
+- Preserved explicit stale-action proof requirement before automatic source-submission rediscovery and retry
+- Updated development dependencies to resolve the current npm audit finding
+
+### Reliability
+
+- Added cross-source regression coverage for repeated identical action references
+- Added cross-source regression coverage for conflicting action references
+- Added page-and-script Server Action consistency coverage
+- Added opaque cross-source action identifier coverage
+- Added compatibility-error regression coverage for course parsing
+- Added compatibility-error regression coverage for problem parsing
+- Preserved existing parser, HTTP security-boundary, source-marker and submission-result regression coverage
+
+### Repository
+
+- Development tests are now kept locally rather than tracked in the public repository
+- Added `tests/` to `.gitignore`
+- Removed public npm scripts that depended on unpublished local test files
+- Local development tests remain runnable directly with Node's built-in test runner
+
 ## 0.7.0 - 2026-09-02
 
 Compatibility and protocol-resilience development release.

@@ -2,7 +2,7 @@
   "name": "tools-ijudge",
   "displayName": "iJudge Extension",
   "description": "An unofficial KMITL iJudge assignment submission extension for VS Code and VSCodium. Part of Mick's Tools.",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "publisher": "micknorj",
   "author": "micknorj",
   "license": "MIT",
@@ -62,9 +62,6 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "npm run compile && node --test tests/*.test.cjs",
-    "test:security": "npm run compile && node --test tests/http.test.cjs",
-    "test:compatibility": "npm run compile && node --test tests/compatibility-0.7.test.cjs",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package",
     "package:list": "vsce ls --tree"

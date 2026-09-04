@@ -13,6 +13,7 @@ import {
 } from "./courses";
 
 import {
+    IJudgeCompatibilityError,
     SessionExpiredError,
 } from "./errors";
 
@@ -149,12 +150,10 @@ async function handleSubmit(
     } catch (error) {
         terminal.show(true);
 
-        terminal.writeLines(
-            "",
+        printError(
+            terminal,
             "Unexpected extension error.",
-            getErrorMessage(
-                error
-            )
+            error
         );
     } finally {
         submissionInProgress =
@@ -447,7 +446,10 @@ async function performSubmission(
 
 async function prepareSource(
     terminal: IJudgeTerminal
-): Promise<PreparedSource | undefined> {
+): Promise<
+    PreparedSource |
+    undefined
+> {
     const editor =
         vscode.window.activeTextEditor;
 
@@ -537,7 +539,10 @@ async function prepareSource(
 async function discoverAssignment(
     problemId: number,
     accessToken: string
-): Promise<AssignmentMatch | undefined> {
+): Promise<
+    AssignmentMatch |
+    undefined
+> {
     const courses =
         await getEnrolledCourses(
             accessToken
@@ -572,7 +577,10 @@ async function runWithReauthentication<T>(
         beforeMessage?: () => void;
         onResume?: () => void;
     }
-): Promise<RetryResult<T> | undefined> {
+): Promise<
+    RetryResult<T> |
+    undefined
+> {
     try {
         return {
             token:
@@ -626,7 +634,10 @@ async function runWithReauthentication<T>(
 async function reauthenticate(
     secrets: vscode.SecretStorage,
     terminal: IJudgeTerminal
-): Promise<string | undefined> {
+): Promise<
+    string |
+    undefined
+> {
     return (
         await login(
             secrets,
@@ -667,7 +678,8 @@ function printSubmissionResult(
             (
                 record
             ) =>
-                record.result === "P"
+                record.result ===
+                "P"
         ).length;
 
     const average =
@@ -699,7 +711,8 @@ function printSubmissionResult(
     }
 
     if (
-        average !== undefined
+        average !==
+        undefined
     ) {
         terminal.writeLine(
             `Average execution: ${average.toFixed(2)} ms`
@@ -707,7 +720,8 @@ function printSubmissionResult(
     }
 
     if (
-        status !== "Passed"
+        status !==
+        "Passed"
     ) {
         terminal.writeLine(
             `Result code:       ${result.result}`
@@ -739,11 +753,6 @@ function printSubmissionResult(
                 }`
             )
     );
-
-    terminal.writeLines(
-        "",
-        `Submission ID: ${result.submissionId}`
-    );
 }
 
 
@@ -752,12 +761,41 @@ function printError(
     heading: string,
     error: unknown
 ): void {
+    if (
+        error instanceof
+        IJudgeCompatibilityError
+    ) {
+        printCompatibilityError(
+            terminal,
+            heading,
+            error
+        );
+
+        return;
+    }
+
     terminal.writeLines(
         "",
         heading,
         getErrorMessage(
             error
         )
+    );
+}
+
+
+function printCompatibilityError(
+    terminal: IJudgeTerminal,
+    heading: string,
+    error: IJudgeCompatibilityError
+): void {
+    terminal.writeLines(
+        "",
+        heading,
+        "",
+        "iJudge compatibility error:",
+        error.message,
+        "The extension stopped rather than using unverified frontend data."
     );
 }
 

@@ -4,6 +4,10 @@ import {
 } from "./actions";
 
 import {
+    IJudgeCompatibilityError,
+} from "./errors";
+
+import {
     assertAuthenticatedResponse,
     fetchIJudge,
     IJUDGE_ORIGIN,
@@ -39,7 +43,8 @@ export async function loginToIJudge(
             await fetchIJudge(
                 "/signin",
                 {
-                    method: "POST",
+                    method:
+                        "POST",
 
                     headers: {
                         Accept:
@@ -82,14 +87,20 @@ export async function loginToIJudge(
                 continue;
             }
 
-            throw new Error(
-                "The current iJudge login action could not be used."
+            throw new IJudgeCompatibilityError(
+                "ACTION_NOT_FOUND",
+                [
+                    "The current iJudge login action remained unavailable",
+                    "after it was rediscovered.",
+                    "The iJudge frontend may have changed.",
+                ].join(" ")
             );
         }
 
         if (
             !response.ok &&
-            response.status !== 303
+            response.status !==
+                303
         ) {
             throw new Error(
                 `iJudge login failed with HTTP ${response.status}.`

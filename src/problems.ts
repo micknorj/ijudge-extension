@@ -7,6 +7,10 @@ import {
 } from "./courses";
 
 import {
+    IJudgeCompatibilityError,
+} from "./errors";
+
+import {
     findFlatObjects,
     getBooleanField,
     getNumberField,
@@ -214,8 +218,12 @@ export function parseCourseProblemsResponse(
         !expectedCourseFound ||
         isExam === undefined
     ) {
-        throw new Error(
-            "Could not read the iJudge problem list."
+        throw new IJudgeCompatibilityError(
+            "PROBLEM_DATA_UNRECOGNIZED",
+            [
+                "The iJudge problem data could not be recognized.",
+                "The iJudge frontend may have changed.",
+            ].join(" ")
         );
     }
 

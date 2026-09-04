@@ -3,6 +3,10 @@ import {
 } from "./client";
 
 import {
+    IJudgeCompatibilityError,
+} from "./errors";
+
+import {
     findFlatObjects,
     getBooleanField,
     getNumberField,
@@ -119,6 +123,11 @@ export function parseCoursesResponse(
         );
     }
 
+    /*
+     * Compatibility path for older/minimal serialized
+     * fragments that do not contain a complete enclosing
+     * object.
+     */
     if (
         courses.length === 0
     ) {
@@ -149,8 +158,12 @@ export function parseCoursesResponse(
     if (
         courses.length === 0
     ) {
-        throw new Error(
-            "Could not read the iJudge course list."
+        throw new IJudgeCompatibilityError(
+            "COURSE_DATA_UNRECOGNIZED",
+            [
+                "The iJudge course data could not be recognized.",
+                "The iJudge frontend may have changed.",
+            ].join(" ")
         );
     }
 

@@ -14,6 +14,10 @@ import {
 } from "./courses";
 
 import {
+    IJudgeCompatibilityError,
+} from "./errors";
+
+import {
     clearProblemCache,
 } from "./problems";
 
@@ -62,11 +66,10 @@ export async function ensureAuthenticated(
                 "Login is required to continue."
             );
         } catch (error) {
-            terminal.writeLines(
+            printAuthenticationError(
+                terminal,
                 "Could not verify the saved iJudge session.",
-                getErrorMessage(
-                    error
-                )
+                error
             );
 
             return undefined;
@@ -99,6 +102,7 @@ export async function login(
 ): Promise<boolean> {
     if (activeLogin) {
         terminal.show(false);
+
         return activeLogin;
     }
 
@@ -134,6 +138,7 @@ export async function logout(
     terminal: IJudgeTerminal
 ): Promise<void> {
     authGeneration++;
+
     activeLogin =
         undefined;
 
@@ -205,8 +210,10 @@ export async function checkLoginStatus(
             "Login status: Session expired."
         );
     } catch (error) {
-        terminal.writeLine(
-            `Could not check login status: ${getErrorMessage(error)}`
+        printAuthenticationError(
+            terminal,
+            "Could not check login status.",
+            error
         );
     }
 }
@@ -293,6 +300,21 @@ async function performLogin(
             return false;
         }
 
+        if (
+            error instanceof
+            IJudgeCompatibilityError
+        ) {
+            printAuthenticationError(
+                terminal,
+                "Login failed.",
+                error
+            );
+
+            terminal.writeLine();
+
+            return false;
+        }
+
         terminal.writeLines(
             `Login failed: ${getErrorMessage(error)}`,
             ""
@@ -319,6 +341,35 @@ function clearRuntimeCaches():
     clearActionCache();
     clearCourseCache();
     clearProblemCache();
+}
+
+
+function printAuthenticationError(
+    terminal: IJudgeTerminal,
+    heading: string,
+    error: unknown
+): void {
+    if (
+        error instanceof
+        IJudgeCompatibilityError
+    ) {
+        terminal.writeLines(
+            heading,
+            "",
+            "iJudge compatibility error:",
+            error.message,
+            "The extension stopped rather than using unverified frontend data."
+        );
+
+        return;
+    }
+
+    terminal.writeLines(
+        heading,
+        getErrorMessage(
+            error
+        )
+    );
 }
 
 

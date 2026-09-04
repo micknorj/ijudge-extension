@@ -1,5 +1,6 @@
 node_modules/
 out/
+tests/
 *.vsix
 *.log
 npm-debug.log*

@@ -9,16 +9,18 @@ An unofficial VS Code and VSCodium extension for submitting normal KMITL iJudge 
 - Submit Python assignments from the editor title bar
 - Automatic file saving before submission
 - Problem ID detection from the first line
-- Dedicated iJudge terminal for login, progress and results
+- Dedicated iJudge terminal for login, progress, and results
 - Automatic login when the saved session is missing or expired
 - Secure session storage using VS Code SecretStorage
 - Automatic enrolled-course discovery
 - Automatic assignment discovery and availability validation
 - Automatic current iJudge Server Action discovery
+- Cross-source Server Action consistency validation
 - In-memory Server Action caching only
 - Automatic stale-action rediscovery when iJudge explicitly reports an unrecognized action
+- Clear compatibility diagnostics when the current iJudge frontend cannot be interpreted safely
 - Submission result polling
-- Testcase result, score, quality and execution-time display
+- Testcase result, score, quality, and execution-time display
 - Temporary course and problem metadata caching
 - Duplicate-submission protection
 - Session-expiration recovery
@@ -53,7 +55,7 @@ If no valid iJudge session exists, the extension opens the dedicated iJudge term
 
 The password is used only for login and is not stored.
 
-After authentication, the extension automatically finds the assignment, validates it, submits the active file and waits for the judging result.
+After authentication, the extension automatically finds the assignment, validates it, submits the active file, and waits for the judging result.
 
 The following commands are also available through the Command Palette:
 
@@ -64,15 +66,33 @@ The following commands are also available through the Command Palette:
 
 Normal use does not require manually running the login command.
 
-## Server Action compatibility
+## Server Action Compatibility
 
 iJudge uses Next.js Server Actions for operations such as login and source submission.
 
 The extension does not ship known iJudge Server Action identifiers. Instead, it reads the current same-origin iJudge frontend, identifies the required action by its generated semantic reference name, and keeps the resulting identifier only in runtime memory.
 
-If iJudge explicitly reports that a cached Server Action no longer exists, the extension may rediscover the current action and retry once. Ambiguous submission failures such as timeouts, lost connections or generic server errors are not automatically retried because the original submission may already have been accepted.
+Server Action identifiers are treated as opaque runtime values. The extension does not depend on a fixed identifier length or encoding.
 
-## Authentication and privacy
+Before selecting an action, the extension compares matching references found across the inspected page and same-origin frontend JavaScript assets.
+
+Repeated references to the same identifier are accepted. If different identifiers are found for the same required action, the extension stops instead of choosing one arbitrarily.
+
+If the frontend cannot be inspected completely, the extension also stops rather than selecting an action from incomplete information.
+
+If iJudge explicitly reports that a cached Server Action no longer exists, the extension may rediscover the current action and retry once.
+
+Ambiguous submission failures such as timeouts, lost connections, or generic server errors are not automatically retried because the original submission may already have been accepted.
+
+## Compatibility Diagnostics
+
+When the current iJudge frontend cannot be interpreted safely, the extension reports an **iJudge compatibility error** in the dedicated terminal.
+
+These errors are intended to distinguish frontend compatibility changes from ordinary authentication, authorization, networking, or assignment-availability failures.
+
+Compatibility diagnostics do not display runtime Server Action identifiers, session tokens, cookies, passwords, or other authentication material.
+
+## Authentication and Privacy
 
 The extension communicates directly with:
 
@@ -84,7 +104,7 @@ Your iJudge password is not stored by the extension.
 
 After successful login, the iJudge access token is stored using VS Code's SecretStorage API. Logging out removes the stored session.
 
-Discovered Server Action identifiers are not written to settings, SecretStorage, logs or project files.
+Discovered Server Action identifiers are not written to settings, SecretStorage, logs, or project files.
 
 Static iJudge frontend JavaScript used for compatibility discovery is fetched without the authenticated session cookie.
 
@@ -112,7 +132,20 @@ The extension currently supports Python assignments.
 
 It is designed for VSCodium and is also compatible with VS Code.
 
-Changes to the iJudge website or its internal interface may temporarily affect compatibility. Version 0.7 reduces this dependency by discovering current Server Actions and reading course/problem metadata from normal authenticated pages instead of embedding known action identifiers.
+Changes to the iJudge website or its internal interface may temporarily affect compatibility.
+
+The current architecture reduces dependence on specific frontend builds by dynamically discovering current Server Actions, validating action references across inspected frontend sources, and reading course/problem metadata from normal authenticated pages rather than embedding known action identifiers or constructing private Next.js navigation requests.
+
+## Development
+
+Development tests are kept locally and are not tracked in the public repository.
+
+Local development tests can be run with:
+
+```powershell
+npm.cmd run compile
+node --test tests/*.test.cjs
+```
 
 ## Disclaimer
 

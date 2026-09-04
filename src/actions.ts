@@ -1,4 +1,8 @@
 import {
+    IJudgeCompatibilityError,
+} from "./errors";
+
+import {
     assertAuthenticatedResponse,
     fetchIJudge,
     IJUDGE_ORIGIN,
@@ -21,8 +25,8 @@ const MAX_ACTION_ID_LENGTH =
 
 
 type ActionKind =
-    "login" |
-    "submit";
+    | "login"
+    | "submit";
 
 
 export interface ServerActionReference {
@@ -33,8 +37,11 @@ export interface ServerActionReference {
 
 const ACTION_NAMES:
     Record<ActionKind, string> = {
-        login: "signIn",
-        submit: "submitCodeToServer",
+        login:
+            "signIn",
+
+        submit:
+            "submitCodeToServer",
     };
 
 
@@ -114,21 +121,47 @@ export function findServerActionId(
     source: string,
     expectedName: string
 ): string | undefined {
+    return findServerActionIdAcrossSources(
+        [
+            source,
+        ],
+        expectedName
+    );
+}
+
+
+export function findServerActionIdAcrossSources(
+    sources: readonly string[],
+    expectedName: string
+): string | undefined {
     const ids =
-        new Set(
+        new Set<string>();
+
+    for (
+        const source
+        of sources
+    ) {
+        const references =
             parseServerActionReferences(
                 source
-            )
-                .filter(
-                    (reference) =>
-                        reference.name ===
-                        expectedName
-                )
-                .map(
-                    (reference) =>
-                        reference.id
-                )
-        );
+            );
+
+        for (
+            const reference
+            of references
+        ) {
+            if (
+                reference.name !==
+                expectedName
+            ) {
+                continue;
+            }
+
+            ids.add(
+                reference.id
+            );
+        }
+    }
 
     if (
         ids.size === 0
@@ -139,14 +172,24 @@ export function findServerActionId(
     if (
         ids.size > 1
     ) {
-        throw new Error(
-            `Multiple iJudge Server Actions matched ${expectedName}.`
+        throw new IJudgeCompatibilityError(
+            "ACTION_AMBIGUOUS",
+            [
+                "Conflicting iJudge Server Actions were found",
+                "for the required frontend action.",
+                "The extension stopped instead of guessing.",
+            ].join(" ")
         );
     }
 
-    return ids.values()
-        .next()
-        .value;
+    for (
+        const id
+        of ids
+    ) {
+        return id;
+    }
+
+    return undefined;
 }
 
 
@@ -275,65 +318,130 @@ async function discoverAction(
             accessToken
         );
 
-    const inline =
-        findServerActionId(
-            pageSource,
-            expectedName
-        );
-
-    if (inline) {
-        return inline;
-    }
-
-    const scripts =
+    const allScripts =
         extractScriptUrls(
             pageSource
-        )
-            .sort(
-                (
+        ).sort(
+            (
+                a,
+                b
+            ) =>
+                scriptPriority(
                     a,
-                    b
-                ) =>
-                    scriptPriority(
-                        a,
-                        kind
-                    ) -
-                    scriptPriority(
-                        b,
-                        kind
-                    )
-            )
-            .slice(
-                0,
-                MAX_SCRIPTS
-            );
+                    kind
+                ) -
+                scriptPriority(
+                    b,
+                    kind
+                )
+        );
+
+    if (
+        allScripts.length >
+        MAX_SCRIPTS
+    ) {
+        throw new IJudgeCompatibilityError(
+            "ACTION_SCAN_INCOMPLETE",
+            [
+                "The current iJudge frontend references more scripts",
+                "than the extension can inspect safely.",
+                "The extension stopped instead of guessing.",
+            ].join(" ")
+        );
+    }
+
+    const sources:
+        string[] = [
+            pageSource,
+        ];
+
+    let scanIncomplete =
+        false;
 
     for (
         const script
-        of scripts
+        of allScripts
     ) {
-        const source =
-            await fetchScriptSafe(
-                script
+        try {
+            sources.push(
+                await fetchScript(
+                    script
+                )
             );
-
-        if (!source) {
-            continue;
-        }
-
-        const action =
-            findServerActionId(
-                source,
-                expectedName
-            );
-
-        if (action) {
-            return action;
+        } catch {
+            scanIncomplete =
+                true;
         }
     }
 
-    throw new Error(
-        `Could not discover the current iJudge ${kind} action.`
+    /*
+     * A failed script request means there is a source that
+     * could contain another reference for the same semantic
+     * action. Returning an already-found action in this state
+     * would restore first-match/partial-scan behavior.
+     */
+    if (
+        scanIncomplete
+    ) {
+        throw new IJudgeCompatibilityError(
+            "ACTION_SCAN_INCOMPLETE",
+            [
+                "The current iJudge frontend could not be inspected",
+                "completely, so the required action could not be",
+                "selected safely.",
+            ].join(" ")
+        );
+    }
+
+    let action:
+        string | undefined;
+
+    try {
+        action =
+            findServerActionIdAcrossSources(
+                sources,
+                expectedName
+            );
+    } catch (error) {
+        if (
+            error instanceof
+            IJudgeCompatibilityError &&
+            error.code ===
+                "ACTION_AMBIGUOUS"
+        ) {
+            const label =
+                kind === "login"
+                    ? "login"
+                    : "submission";
+
+            throw new IJudgeCompatibilityError(
+                "ACTION_AMBIGUOUS",
+                [
+                    `Conflicting iJudge ${label} actions were found`,
+                    "in the current frontend.",
+                    "The extension stopped instead of guessing.",
+                ].join(" ")
+            );
+        }
+
+        throw error;
+    }
+
+    if (action) {
+        return action;
+    }
+
+    const label =
+        kind === "login"
+            ? "login"
+            : "submission";
+
+    throw new IJudgeCompatibilityError(
+        "ACTION_NOT_FOUND",
+        [
+            `The required iJudge ${label} action could not be found.`,
+            "The iJudge frontend may have changed.",
+        ].join(" ")
     );
 }
 
@@ -382,28 +490,21 @@ async function fetchPageSource(
 }
 
 
-async function fetchScriptSafe(
-    scriptUrl: string
-): Promise<string | undefined> {
-    try {
-        return await fetchScript(
-            scriptUrl
-        );
-    } catch {
-        return undefined;
-    }
-}
-
-
 async function fetchScript(
     scriptUrl: string
 ): Promise<string> {
+    /*
+     * Deliberately no access token is supplied here.
+     * Static frontend assets must never receive the
+     * authenticated iJudge session cookie.
+     */
     const response =
         await fetchIJudge(
             scriptUrl,
             {
                 headers: {
-                    Accept: "*/*",
+                    Accept:
+                        "*/*",
                 },
             }
         );
@@ -552,7 +653,9 @@ function scriptPriority(
                 sourceName
             );
     } catch {
-        // Keep encoded URL.
+        /*
+         * Keep the encoded URL.
+         */
     }
 
     source =
@@ -591,7 +694,8 @@ function findInvocationOpen(
         fromIndex;
 
     while (
-        index < source.length &&
+        index <
+            source.length &&
         /\s/.test(
             source[index]
         )
@@ -599,13 +703,20 @@ function findInvocationOpen(
         index++;
     }
 
+    /*
+     * Supports the common minified form:
+     *
+     * (0,x.createServerReference)(...)
+     */
     while (
-        source[index] === ")"
+        source[index] ===
+        ")"
     ) {
         index++;
 
         while (
-            index < source.length &&
+            index <
+                source.length &&
             /\s/.test(
                 source[index]
             )
@@ -615,7 +726,8 @@ function findInvocationOpen(
     }
 
     return (
-        source[index] === "("
+        source[index] ===
+        "("
     )
         ? index
         : -1;
@@ -633,15 +745,16 @@ function readCall(
         1;
 
     let quote:
-        string |
-        undefined;
+        string | undefined;
 
     let escaped =
         false;
 
     for (
-        let index = openIndex + 1;
-        index < source.length;
+        let index =
+            openIndex + 1;
+        index <
+            source.length;
         index++
     ) {
         const character =
@@ -656,7 +769,8 @@ function readCall(
             }
 
             if (
-                character === "\\"
+                character ===
+                "\\"
             ) {
                 escaped =
                     true;
@@ -665,7 +779,8 @@ function readCall(
             }
 
             if (
-                character === quote
+                character ===
+                quote
             ) {
                 quote =
                     undefined;
@@ -675,9 +790,12 @@ function readCall(
         }
 
         if (
-            character === '"' ||
-            character === "'" ||
-            character === "`"
+            character ===
+                '"' ||
+            character ===
+                "'" ||
+            character ===
+                "`"
         ) {
             quote =
                 character;
@@ -686,28 +804,36 @@ function readCall(
         }
 
         if (
-            character === "("
+            character ===
+            "("
         ) {
             depth++;
-        } else if (
-            character === ")"
+
+            continue;
+        }
+
+        if (
+            character !==
+            ")"
         ) {
-            depth--;
+            continue;
+        }
 
-            if (
-                depth === 0
-            ) {
-                return {
-                    body:
-                        source.slice(
-                            openIndex + 1,
-                            index
-                        ),
+        depth--;
 
-                    endIndex:
-                        index,
-                };
-            }
+        if (
+            depth === 0
+        ) {
+            return {
+                body:
+                    source.slice(
+                        openIndex + 1,
+                        index
+                    ),
+
+                endIndex:
+                    index,
+            };
         }
     }
 
@@ -734,15 +860,15 @@ function splitTopLevelArguments(
         0;
 
     let quote:
-        string |
-        undefined;
+        string | undefined;
 
     let escaped =
         false;
 
     for (
         let index = 0;
-        index < source.length;
+        index <
+            source.length;
         index++
     ) {
         const character =
@@ -757,7 +883,8 @@ function splitTopLevelArguments(
             }
 
             if (
-                character === "\\"
+                character ===
+                "\\"
             ) {
                 escaped =
                     true;
@@ -766,7 +893,8 @@ function splitTopLevelArguments(
             }
 
             if (
-                character === quote
+                character ===
+                quote
             ) {
                 quote =
                     undefined;
@@ -776,9 +904,12 @@ function splitTopLevelArguments(
         }
 
         if (
-            character === '"' ||
-            character === "'" ||
-            character === "`"
+            character ===
+                '"' ||
+            character ===
+                "'" ||
+            character ===
+                "`"
         ) {
             quote =
                 character;
@@ -827,6 +958,7 @@ function splitTopLevelArguments(
                     start =
                         index + 1;
                 }
+
                 break;
         }
     }
@@ -857,10 +989,13 @@ function parseStringLiteral(
         value[0];
 
     if (
-        (quote !== '"' &&
-            quote !== "'") ||
-        value[value.length - 1] !==
-            quote
+        (
+            quote !== '"' &&
+            quote !== "'"
+        ) ||
+        value[
+            value.length - 1
+        ] !== quote
     ) {
         return undefined;
     }
@@ -870,14 +1005,16 @@ function parseStringLiteral(
 
     for (
         let index = 1;
-        index < value.length - 1;
+        index <
+            value.length - 1;
         index++
     ) {
         const character =
             value[index];
 
         if (
-            character !== "\\"
+            character !==
+            "\\"
         ) {
             result +=
                 character;
@@ -888,7 +1025,8 @@ function parseStringLiteral(
         index++;
 
         if (
-            index >= value.length - 1
+            index >=
+            value.length - 1
         ) {
             return undefined;
         }
@@ -898,27 +1036,33 @@ function parseStringLiteral(
 
         switch (escaped) {
             case "n":
-                result += "\n";
+                result +=
+                    "\n";
                 break;
 
             case "r":
-                result += "\r";
+                result +=
+                    "\r";
                 break;
 
             case "t":
-                result += "\t";
+                result +=
+                    "\t";
                 break;
 
             case "b":
-                result += "\b";
+                result +=
+                    "\b";
                 break;
 
             case "f":
-                result += "\f";
+                result +=
+                    "\f";
                 break;
 
             case "v":
-                result += "\v";
+                result +=
+                    "\v";
                 break;
 
             case "x": {
@@ -929,9 +1073,10 @@ function parseStringLiteral(
                     );
 
                 if (
-                    !/^[0-9a-f]{2}$/i.test(
-                        hex
-                    )
+                    !/^[0-9a-f]{2}$/i
+                        .test(
+                            hex
+                        )
                 ) {
                     return undefined;
                 }
@@ -945,6 +1090,7 @@ function parseStringLiteral(
                     );
 
                 index += 2;
+
                 break;
             }
 
@@ -956,9 +1102,10 @@ function parseStringLiteral(
                     );
 
                 if (
-                    !/^[0-9a-f]{4}$/i.test(
-                        hex
-                    )
+                    !/^[0-9a-f]{4}$/i
+                        .test(
+                            hex
+                        )
                 ) {
                     return undefined;
                 }
@@ -972,12 +1119,14 @@ function parseStringLiteral(
                     );
 
                 index += 4;
+
                 break;
             }
 
             default:
                 result +=
                     escaped;
+
                 break;
         }
     }
@@ -993,9 +1142,11 @@ function isUsableActionId(
         value.length > 0 &&
         value.length <=
             MAX_ACTION_ID_LENGTH &&
-        value.trim() === value &&
-        !/[\u0000-\u001f\u007f]/.test(
-            value
-        )
+        value.trim() ===
+            value &&
+        !/[\u0000-\u001f\u007f]/
+            .test(
+                value
+            )
     );
 }
