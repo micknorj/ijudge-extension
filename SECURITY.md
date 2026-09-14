@@ -262,9 +262,9 @@ The extension also uses request timeouts and bounded result parsing.
 
 These limits are intended to reduce the impact of malformed or unexpectedly large responses.
 
-## Local Development Tests
+## Development Tests
 
-Development tests are kept locally and are not tracked in the current public repository.
+Development tests are tracked in the public repository from version 0.8 onward so security and compatibility regression coverage is preserved with the source. The `tests/` directory must remain excluded from the distributed VSIX package.
 
 Test fixtures must not contain:
 

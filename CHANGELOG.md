@@ -53,10 +53,9 @@ Compatibility-safety and diagnostics development release.
 
 ### Repository
 
-- Development tests are now kept locally rather than tracked in the public repository
-- Added `tests/` to `.gitignore`
-- Removed public npm scripts that depended on unpublished local test files
-- Local development tests remain runnable directly with Node's built-in test runner
+- Development tests are tracked with the public source from the 0.8 development line onward
+- `tests/` remains excluded from distributed VSIX packages through `.vscodeignore`
+- Tests remain runnable directly with Node's built-in test runner
 
 ## 0.7.0 - 2026-09-02
 

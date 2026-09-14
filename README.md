@@ -138,9 +138,9 @@ The current architecture reduces dependence on specific frontend builds by dynam
 
 ## Development
 
-Development tests are kept locally and are not tracked in the public repository.
+Development tests are tracked in the public repository so regression coverage is preserved with the source. The `tests/` directory is excluded from the packaged VSIX through `.vscodeignore`.
 
-Local development tests can be run with:
+Development tests can be run with:
 
 ```powershell
 npm.cmd run compile
