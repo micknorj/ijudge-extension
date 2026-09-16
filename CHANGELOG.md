@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the iJudge Extension, part of **Mick's Tools**, will be documented in this file.
+Notable changes to iJudge Extension.
 
 ## 0.8.0 - 2026-09-05
 
@@ -9,53 +9,47 @@ Compatibility-safety and diagnostics development release.
 ### Compatibility
 
 - Added cross-source Server Action consistency validation
-- Server Action references are now evaluated across the inspected page and same-origin frontend JavaScript assets before an action is selected
-- Repeated identical Server Action references remain valid
-- Conflicting identifiers for the same semantic action are rejected
-- Incomplete Server Action discovery now fails closed instead of selecting an action from partial information
+- Evaluated references across the inspected page and same-origin frontend JavaScript before selecting an action
+- Allowed repeated references to the same identifier
+- Rejected conflicting identifiers for the same semantic action
+- Failed closed when Server Action discovery was incomplete
 - Preserved opaque Server Action identifier handling
-- Preserved semantic action discovery for `signIn`
-- Preserved semantic action discovery for `submitCodeToServer`
-- Preserved normal authenticated HTML course/problem discovery
+- Preserved semantic discovery for `signIn`
+- Preserved semantic discovery for `submitCodeToServer`
+- Preserved normal authenticated HTML course and problem discovery
 
 ### Diagnostics
 
 - Added dedicated iJudge compatibility errors
-- Added explicit diagnostics for missing Server Actions
-- Added explicit diagnostics for conflicting Server Actions
-- Added explicit diagnostics for incomplete Server Action discovery
-- Added explicit diagnostics for unrecognized course data
-- Added explicit diagnostics for unrecognized problem data
-- Login now presents frontend compatibility failures separately from ordinary authentication failures
-- Assignment discovery and submission now present frontend compatibility failures separately from ordinary runtime failures
-- Compatibility diagnostics do not expose runtime Server Action identifiers or authentication material
+- Added diagnostics for missing, conflicting and incompletely discovered Server Actions
+- Added diagnostics for unrecognized course and problem data
+- Separated frontend compatibility failures from ordinary authentication failures during login
+- Separated frontend compatibility failures from ordinary runtime failures during assignment discovery and submission
+- Prevented compatibility diagnostics from exposing Server Action identifiers or authentication material
 
 ### Security
 
-- Server Action selection now fails closed when frontend references conflict
-- Server Action selection now fails closed when the frontend cannot be inspected completely
+- Failed closed when frontend references conflict or cannot be inspected completely
 - Preserved same-origin restrictions for iJudge requests
 - Preserved unauthenticated static frontend JavaScript requests
 - Preserved in-memory-only Server Action caching
 - Preserved protection against retrying ambiguous source submissions
-- Preserved explicit stale-action proof requirement before automatic source-submission rediscovery and retry
+- Preserved the explicit stale-action proof requirement before rediscovery and retry
 - Updated development dependencies to resolve the current npm audit finding
 
 ### Reliability
 
-- Added cross-source regression coverage for repeated identical action references
-- Added cross-source regression coverage for conflicting action references
+- Added regression coverage for repeated and conflicting cross-source action references
 - Added page-and-script Server Action consistency coverage
 - Added opaque cross-source action identifier coverage
-- Added compatibility-error regression coverage for course parsing
-- Added compatibility-error regression coverage for problem parsing
-- Preserved existing parser, HTTP security-boundary, source-marker and submission-result regression coverage
+- Added compatibility-error regression coverage for course and problem parsing
+- Preserved existing parser, HTTP security-boundary, source-marker and submission-result coverage
 
 ### Repository
 
-- Development tests are tracked with the public source from the 0.8 development line onward
-- `tests/` remains excluded from distributed VSIX packages through `.vscodeignore`
-- Tests remain runnable directly with Node's built-in test runner
+- Tracked development tests with the public source from the 0.8 development line onward
+- Kept `tests/` excluded from distributed VSIX packages through `.vscodeignore`
+- Kept tests runnable with Node's built-in test runner
 
 ## 0.7.0 - 2026-09-02
 
@@ -64,42 +58,36 @@ Compatibility and protocol-resilience development release.
 ### Compatibility
 
 - Rebuilt iJudge Server Action discovery
-- Server Action identifiers are now treated as opaque runtime values
-- Server Actions are identified using their generated semantic reference names
-- Added automatic discovery for the current login operation
-- Added automatic discovery for the current source-submission operation
+- Treated Server Action identifiers as opaque runtime values
+- Identified Server Actions through generated semantic reference names
+- Added automatic discovery for login and source submission
 - Added explicit stale Server Action detection
 - Added one-time rediscovery after an explicit Next.js action-not-found response
 - Removed dependence on a fixed Server Action identifier length
-- Replaced manually constructed RSC course/problem requests with normal authenticated HTML requests
-- Added field-order-independent course parsing
-- Added field-order-independent problem parsing
+- Replaced manually constructed RSC course and problem requests with normal authenticated HTML requests
+- Added field-order-independent course and problem parsing
 
 ### Security
 
-- Removed hard-coded login Server Action fallback identifiers
-- Removed hard-coded submission Server Action fallback identifiers
-- Server Action identifiers are kept only in runtime memory
+- Removed hard-coded login and submission Server Action fallback identifiers
+- Kept Server Action identifiers in runtime memory only
 - Preserved same-origin restrictions for iJudge requests
 - Preserved unauthenticated static frontend JavaScript requests
 - Preserved response-size limits
-- Preserved explicit source-submission requirement
+- Preserved the explicit source-submission requirement
 - Preserved protection against retrying ambiguous submissions
 - Distinguished generic forbidden responses from definite session-expiration responses
 
 ### Reliability
 
-- Session validation now checks that the returned page resembles the authenticated Courses page
+- Validated that session-check responses resemble the authenticated Courses page
 - Added shared parsing helpers for embedded Next.js page data
-- Added Server Action discovery regression tests for different identifier lengths
-- Added opaque Server Action identifier tests
-- Added semantic Server Action selection tests
-- Added ambiguous-action rejection tests
+- Added tests for different identifier lengths, opaque identifiers, semantic selection and ambiguous-action rejection
 - Added field-order-independent course and problem parser tests
-- Fixed average execution calculation when some testcases do not provide execution times
+- Fixed average execution calculation when some testcases omit execution times
 - Prevented multiple simultaneous login prompts
-- Logout now cancels a pending terminal login prompt
-- Authentication resets now clear runtime Server Action caches
+- Made logout cancel a pending terminal login prompt
+- Cleared runtime Server Action caches during authentication resets
 
 ### Removed
 
@@ -109,7 +97,7 @@ Compatibility and protocol-resilience development release.
 - Server Action candidate scoring
 - Nearby-keyword Server Action guessing
 - Random `_rsc` key generation
-- Manually constructed RSC course/problem requests
+- Manually constructed RSC course and problem requests
 
 ## 0.6.1
 
@@ -117,12 +105,11 @@ Security, reliability and maintainability release.
 
 ### Security
 
-- Centralized all authenticated network requests
+- Centralized authenticated network requests
 - Restricted extension requests to the official iJudge origin
-- Prevented callers from manually injecting authentication cookies
+- Prevented callers from injecting authentication cookies
 - Removed authentication cookies from static JavaScript requests
-- Added controlled network timeouts
-- Added response-size limits
+- Added controlled network timeouts and response-size limits
 - Hardened redirect handling
 - Improved session-expiration detection
 - Added an input-size limit to the iJudge terminal
@@ -133,10 +120,7 @@ Security, reliability and maintainability release.
 
 ### Reliability
 
-- Added automated problem-marker tests
-- Added automated course parser tests
-- Added automated assignment parser tests
-- Added automated submission-result parser tests
+- Added automated problem-marker, course parser, assignment parser and submission-result parser tests
 - Added tests for plain and escaped Next.js result data
 - Added regression tests for exam-labelled assignment blocking
 - Added regression tests for iJudge quality-score calculations
@@ -147,8 +131,7 @@ Security, reliability and maintainability release.
 - Reduced duplicated HTTP logic
 - Centralized session recovery
 - Reduced Server Action discovery requests
-- Simplified problem ID detection
-- Simplified terminal output helpers
+- Simplified problem ID detection and terminal output helpers
 - Improved polling failure handling
 - Separated submission parsing from network requests
 - Preserved temporary course and problem caching
@@ -174,25 +157,20 @@ Initial public pre-release.
 - Python assignment submission from the editor title bar
 - Dedicated iJudge terminal
 - Automatic authentication when required
-- Secure session storage using VS Code SecretStorage
-- Automatic enrolled-course discovery
-- Automatic assignment discovery
+- Secure session storage with VS Code SecretStorage
+- Automatic enrolled-course and assignment discovery
 - Assignment availability validation
 - Automatic iJudge Server Action discovery
 - Compatibility fallback for known Server Actions
-- Source submission
-- Submission ID handling
+- Source submission and submission ID handling
 - Automatic judging polling
-- Testcase result display
-- Score display
-- PEP 8 quality score display
-- Average execution time display
+- Testcase, score, PEP 8 quality and average execution-time display
 - Session-expiration recovery
 - Temporary course and problem metadata caching
 - Duplicate-submission protection
 - Network request timeouts
 
-### Current limitations
+### Limitations
 
 - Python assignments only
-- Automatic exam-labelled assignment submission is disabled
+- Automatic submission of exam-labelled assignments disabled

@@ -1,23 +1,21 @@
-# Security Policy
+# Security policy
 
-iJudge Extension is part of **Mick's Tools** and is maintained by **micknorj**.
+## Supported versions
 
-## Supported Versions
+The latest published version is supported for security fixes.
 
-The latest published version is the version currently supported for security fixes.
+Development builds may change before release. Older versions may stop receiving fixes after a newer version is published.
 
-Development builds may change before release, and older versions may no longer receive fixes after a newer version is published.
+## Reporting a vulnerability
 
-## Reporting a Vulnerability
+Do not post passwords, access tokens, cookies, private source code, signing material or other sensitive account information in a public GitHub issue.
 
-Do not post passwords, access tokens, cookies, private source code, signing material, or other sensitive account information in a public GitHub issue.
-
-For a security vulnerability, use GitHub's private vulnerability reporting feature if it is available for this repository.
+Use GitHub's private vulnerability reporting feature if it is available for this repository.
 
 A useful report should include:
 
-- The affected extension version
-- A description of the issue
+- Affected extension version
+- Description of the issue
 - Steps to reproduce it
 - Expected behavior
 - Actual behavior
@@ -32,27 +30,15 @@ Do not include:
 - Runtime Server Action identifiers
 - Private signing keys
 
-## Security Model
+## Security model
 
-The extension communicates directly with:
+The extension communicates directly with [iJudge](https://ijudge.it.kmitl.ac.th) and does not operate an intermediary server.
 
-`https://ijudge.it.kmitl.ac.th`
+Your iJudge password is used only during authentication and is not stored. After successful login, the session token is stored with VS Code [SecretStorage](https://code.visualstudio.com/api/references/vscode-api#SecretStorage).
 
-The extension does not operate an intermediary server.
+Source code is sent only when you explicitly submit it. Authenticated requests are restricted to the official iJudge origin.
 
-The user's iJudge password is used only during authentication and is not stored by the extension.
-
-After successful authentication, the iJudge session token is stored using the VS Code SecretStorage API.
-
-Source code is sent to iJudge only when the user explicitly submits it.
-
-Authenticated requests are restricted to the official iJudge origin.
-
-## Authentication
-
-The extension uses the user's normal iJudge account and authenticated session.
-
-It does not attempt to bypass:
+The extension uses your normal iJudge account and does not attempt to bypass:
 
 - Authentication
 - Course enrollment
@@ -63,33 +49,25 @@ It does not attempt to bypass:
 - Examination restrictions
 - Other server-side authorization rules
 
-A response indicating forbidden access is not automatically treated as an expired session.
+A forbidden response is not automatically treated as an expired session. Session recovery is used only when the response clearly indicates that authentication is no longer valid.
 
-Session-expiration handling is reserved for responses that clearly indicate that authentication is no longer valid.
+## Credential storage
 
-## Credential Storage
+The password is never stored.
 
-The extension does not store the user's password.
+The authenticated session token is stored in SecretStorage under the extension's session key. Logging out removes the stored token and clears runtime authentication and frontend-discovery caches.
 
-The authenticated iJudge session token is stored using VS Code SecretStorage under the extension's existing session key.
-
-Logging out removes the stored session token and clears runtime caches related to authentication and iJudge frontend discovery.
-
-## Same-Origin Networking
+## Networking
 
 Authenticated requests are restricted to the official iJudge origin.
 
-The extension does not intentionally send the user's authenticated session cookie to external origins.
+Authentication cookie attachment is handled centrally. Callers cannot provide their own `Cookie` header for authenticated requests.
 
-Authentication cookie attachment is handled centrally rather than being supplied manually by individual callers.
+Redirects are handled explicitly so authentication data is not silently forwarded to another origin.
 
-Caller-supplied `Cookie` headers are not accepted for authenticated requests.
+## Static frontend assets
 
-Redirect behavior is handled explicitly so authentication data is not silently forwarded to another origin.
-
-## Static Frontend Assets
-
-The extension may inspect current iJudge frontend JavaScript assets in order to discover the Server Actions required for login and source submission.
+The extension may inspect current iJudge frontend JavaScript to discover the Server Actions required for login and source submission.
 
 These assets must:
 
@@ -97,28 +75,20 @@ These assets must:
 - Be referenced by the current iJudge frontend
 - Be fetched without the authenticated session cookie
 
-Static JavaScript discovery requests do not receive the user's iJudge authentication token.
+Static discovery requests do not receive the user's iJudge authentication token.
 
-## Server Action Handling
-
-iJudge currently uses Next.js Server Actions for operations such as login and source submission.
+## Server Action handling
 
 The extension does not ship known production Server Action identifiers as compatibility fallbacks.
 
-Server Action identifiers are discovered from the current same-origin iJudge frontend.
-
-They are treated as opaque runtime values.
-
-The extension does not assume that an identifier:
+Identifiers are discovered from the current same-origin frontend and treated as opaque runtime values. The extension does not assume that an identifier:
 
 - Has a fixed length
 - Is hexadecimal
-- Uses a particular encoding
-- Remains stable between iJudge frontend builds
+- Uses a specific encoding
+- Remains stable between frontend builds
 
-Server Action identifiers are kept only in process memory.
-
-They are not intentionally written to:
+Identifiers are kept only in process memory and are not intentionally written to:
 
 - Source files
 - Settings
@@ -128,54 +98,48 @@ They are not intentionally written to:
 - Documentation
 - Test fixtures
 
-Development tests must use synthetic Server Action identifiers.
+Development tests must use synthetic identifiers.
 
-Server Action identifiers are frontend compatibility metadata. They are not treated as authentication credentials and do not replace normal iJudge authentication or authorization.
+Server Action identifiers are compatibility metadata. They do not replace iJudge authentication or authorization.
 
-## Semantic Server Action Discovery
+### Semantic discovery
 
-The extension identifies required Server Actions using their frontend semantic references.
-
-Current supported operations include:
+Current supported semantic references are:
 
 - `signIn`
 - `submitCodeToServer`
 
-The extension does not brute-force or enumerate unknown Server Actions.
+The extension does not brute-force or enumerate unknown Server Actions and does not invoke mutation actions merely to discover which action exists.
 
-It does not invoke mutation actions merely to discover which action exists.
+Discovery is limited to information exposed through normal same-origin iJudge resources.
 
-Discovery is limited to frontend information exposed through normal same-origin iJudge resources.
+### Cross-source validation
 
-## Cross-Source Action Safety
+Before selecting an action, the extension compares matching references found across the inspected page and same-origin frontend JavaScript.
 
-Before selecting a Server Action, the extension evaluates matching references found across the inspected page and same-origin frontend JavaScript assets.
+Repeated references to the same identifier are accepted.
 
-Multiple references to the same identifier are permitted.
+If different identifiers are found for the same semantic action, or if the frontend cannot be inspected completely within the extension's safety limits, the extension stops instead of selecting from incomplete or conflicting information.
 
-If multiple distinct identifiers are found for the same required semantic action, the extension fails closed instead of selecting one arbitrarily.
+### Stale actions
 
-If the frontend cannot be inspected completely within the extension's safety limits, the extension also fails closed instead of using a result based on incomplete information.
+A cached action may become stale while the extension is running.
 
-This protects against silently selecting an incorrect or outdated action when the frontend is inconsistent.
+The extension recognizes the explicit Next.js marker:
 
-## Stale Server Actions
+```text
+x-nextjs-action-not-found: 1
+```
 
-A cached Server Action may become stale while the extension is running.
+When this marker is present, the relevant cached action may be discarded and rediscovered.
 
-The extension recognizes the explicit Next.js stale-action response:
+A source submission may be retried only after this response proves that the referenced action was not recognized. At most one retry is allowed.
 
-`x-nextjs-action-not-found: 1`
+## Submission retry safety
 
-When this explicit marker is present, the relevant cached action may be discarded and rediscovered.
+Source submission changes server state and is handled conservatively.
 
-A source-submission request may be retried only after this explicit response proves that the referenced Server Action was not recognized.
-
-## Submission Retry Safety
-
-Source submission is a mutation and is handled conservatively.
-
-The extension does not automatically retry a submission after ambiguous failures such as:
+The extension does not automatically retry after ambiguous failures such as:
 
 - Request timeout
 - Connection loss
@@ -183,17 +147,15 @@ The extension does not automatically retry a submission after ambiguous failures
 - Generic HTTP 5xx response
 - Malformed response
 - Uncertain response
-- Other cases where it is unknown whether the original submission was accepted
+- Any case where it is unknown whether the original submission was accepted
 
-This prevents accidental duplicate submissions.
+This reduces the risk of duplicate submissions.
 
 The only automatic source-submission rediscovery and retry path is the explicit stale-action response described above.
 
-At most one retry is permitted for that condition.
+## Compatibility diagnostics
 
-## Compatibility Diagnostics
-
-The extension reports frontend compatibility failures separately from ordinary runtime failures where possible.
+Frontend compatibility failures are reported separately from ordinary runtime failures where possible.
 
 Examples include:
 
@@ -203,9 +165,9 @@ Examples include:
 - Unrecognized course data
 - Unrecognized problem data
 
-Compatibility diagnostics are designed to fail safely rather than guess how a changed iJudge frontend should be interpreted.
+Compatibility diagnostics fail safely rather than guessing how a changed frontend should be interpreted.
 
-Compatibility diagnostics must not expose:
+They must not expose:
 
 - Runtime Server Action identifiers
 - Passwords
@@ -214,19 +176,17 @@ Compatibility diagnostics must not expose:
 - Authentication request bodies
 - Other authentication material
 
-Ordinary changes to the iJudge frontend that temporarily break compatibility are generally treated as software compatibility issues rather than security vulnerabilities unless they create a security impact.
+A frontend change that breaks compatibility is normally a software compatibility issue rather than a security vulnerability unless it creates a security impact.
 
-## Course and Problem Discovery
+## Course and problem discovery
 
-Course and problem information is obtained from normal authenticated iJudge pages.
+Course and problem information is read from normal authenticated iJudge pages.
 
-The extension does not construct synthetic Next.js client-navigation requests solely to obtain this information.
+The extension does not construct synthetic Next.js client-navigation requests solely to obtain this information. Parsers avoid unnecessary dependence on serialized property ordering.
 
-Parsers are designed to avoid depending unnecessarily on exact serialized property ordering.
+If required course or problem data cannot be recognized safely, the extension stops instead of assuming the assignment or submission target.
 
-If required course or problem information cannot be recognized safely, the extension stops rather than making assumptions about assignment access or submission targets.
-
-## Assignment Restrictions
+## Assignment restrictions
 
 The extension is intended for normal programming assignments available to the authenticated user.
 
@@ -244,27 +204,25 @@ Restrictions include checks for:
 
 The extension does not attempt to weaken or override server-side restrictions.
 
-## Submission Target Integrity
+## Submission target integrity
 
-The extension uses the iJudge course-problem identifier `cp_id` as the submission field:
+The iJudge course-problem identifier `cp_id` is submitted as:
 
-`course_problem_id`
+```text
+course_problem_id
+```
 
-It must not substitute `cp_problem_id` for this value.
+It must not be replaced with `cp_problem_id`, which could target a different course-problem relationship.
 
-This distinction is required to avoid sending a submission to the wrong course-problem relationship.
+## Response and input limits
 
-## Response and Input Limits
-
-Network responses and terminal input are bounded to reduce the risk of excessive memory use or unbounded parsing.
+Network responses and terminal input are bounded to reduce excessive memory use and unbounded parsing.
 
 The extension also uses request timeouts and bounded result parsing.
 
-These limits are intended to reduce the impact of malformed or unexpectedly large responses.
+## Development tests
 
-## Development Tests
-
-Development tests are tracked in the public repository from version 0.8 onward so security and compatibility regression coverage is preserved with the source. The `tests/` directory must remain excluded from the distributed VSIX package.
+Security and compatibility tests are tracked in the public repository from version 0.8 onward. The `tests/` directory must remain excluded from the distributed VSIX package.
 
 Test fixtures must not contain:
 
@@ -275,32 +233,30 @@ Test fixtures must not contain:
 - Authorization values
 - Private signing material
 
-Synthetic values should be used for security and compatibility regression tests.
+Use synthetic values for security and compatibility regression tests.
 
-## Security-Sensitive Areas
+## Security-sensitive areas
 
-Security issues may include, but are not limited to:
+Security issues may include:
 
 - Credential or session-token disclosure
-- Authentication data being sent to an unintended origin
+- Authentication data sent to an unintended origin
 - Unsafe redirect handling
 - Unauthorized access introduced by the extension
 - Submission without explicit user action
 - Access-control bypasses introduced by the extension
-- Authentication cookies being attached to static frontend assets
+- Authentication cookies attached to static frontend assets
 - Persistence or logging of runtime Server Action identifiers
 - Unsafe selection of conflicting Server Actions
-- Automatic retry of an ambiguous source-submission request
+- Automatic retry of an ambiguous source submission
 - Weakening of examination or assignment restrictions
 - Incorrect submission-target handling
 
-## Examination Restrictions
+## Examination restrictions
 
-The extension is not intended to automate examination submissions.
+The extension is not intended to automate examination submissions. Automatic submission of exam-labelled assignments is intentionally blocked.
 
-Automatic submission of exam-labelled assignments is intentionally blocked.
-
-The extension must not be modified as part of normal project development to bypass authentication, enrollment, release times, expiration times, disabled submission state, examination restrictions, or other iJudge controls.
+Normal project development must not bypass authentication, enrollment, release times, expiration times, disabled submission state, examination restrictions or other iJudge controls.
 
 ## Disclaimer
 
