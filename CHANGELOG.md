@@ -2,6 +2,25 @@
 
 Notable changes to iJudge Extension.
 
+## 0.8.1 - 2026-09-19
+
+Focused terminal presentation release.
+
+### Improved
+
+- Grouped assignment, submission, result, code-quality and testcase output into compact terminal sections
+- Added per-testcase execution times when iJudge provides them
+- Added server-provided code-quality issue details with line, column, category and message
+- Structured assignment restrictions, compatibility diagnostics and other errors consistently
+- Sanitized section text to prevent terminal control sequences from affecting presentation
+- Preserved percentage-only code-quality output when detailed issue data is missing or malformed
+
+### Reliability
+
+- Added regression coverage for terminal section formatting and control-character handling
+- Added quality-result coverage for 100%, below-100%, zero, one, multiple, missing and malformed issue data
+- Preserved existing submission-result and testcase parsing behavior
+
 ## 0.8.0 - 2026-09-05
 
 Compatibility-safety and diagnostics development release.

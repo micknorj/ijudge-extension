@@ -5,17 +5,44 @@ export interface TestcaseResult {
 }
 
 
+export interface CodeQualityIssue {
+    category: string;
+    line: number;
+    column: number;
+    message: string;
+}
+
+
 export interface SubmissionResult {
     submissionId: number;
     result: string;
     score: number;
     qualityScore: number | undefined;
+    qualityIssues: CodeQualityIssue[];
     records: TestcaseResult[];
+}
+
+
+interface QualityFields {
+    report: string | undefined;
+    score: number | undefined;
 }
 
 
 const MAX_SUBMISSION_REGION_CHARS =
     2 * 1024 * 1024;
+
+const MAX_FLIGHT_STREAM_CHARS =
+    8 * 1024 * 1024;
+
+const MAX_QUALITY_REPORT_BYTES =
+    256 * 1024;
+
+const MAX_QUALITY_ISSUES =
+    100;
+
+const MAX_QUALITY_MESSAGE_CHARS =
+    500;
 
 
 export function parseSubmissionResult(
@@ -68,16 +95,31 @@ export function parseSubmissionResult(
         return undefined;
     }
 
+    const quality =
+        extractQualityFields(
+            region
+        );
+
+    const qualityReport =
+        extractQualityReport(
+            source,
+            quality.report
+        );
+
     return {
         submissionId,
         result,
         score,
 
         qualityScore:
-            extractNumberField(
-                region,
-                "pep8_score"
-            ),
+            quality.score,
+
+        qualityIssues:
+            qualityReport
+                ? extractQualityIssues(
+                    qualityReport
+                )
+                : [],
 
         records,
     };
@@ -169,6 +211,18 @@ export function formatScore(
         }
     ).format(
         score
+    );
+}
+
+
+export function formatCodeQualityIssue(
+    issue: CodeQualityIssue
+): string {
+    return (
+        `Line ${issue.line}, ` +
+        `column ${issue.column} ` +
+        `(${issue.category}): ` +
+        issue.message
     );
 }
 
@@ -296,6 +350,312 @@ function extractTestcaseRecords(
             a.testcaseId -
             b.testcaseId
     );
+}
+
+
+function extractQualityReport(
+    source: string,
+    value: string | undefined
+): string | undefined {
+    if (!value) {
+        return undefined;
+    }
+
+    const reference =
+        /^\$([A-Za-z0-9]+)$/
+            .exec(
+                value
+            )?.[1];
+
+    if (!reference) {
+        return value;
+    }
+
+    const flightStream =
+        extractNextFlightStream(
+            source
+        );
+
+    if (!flightStream) {
+        return undefined;
+    }
+
+    const marker =
+        new RegExp(
+            `(?:^|\\n)${escapeRegExp(reference)}` +
+            `:T([0-9A-Fa-f]+),`
+        ).exec(
+            flightStream
+        );
+
+    if (
+        !marker ||
+        marker.index ===
+            undefined
+    ) {
+        return undefined;
+    }
+
+    const byteLength =
+        Number.parseInt(
+            marker[1],
+            16
+        );
+
+    if (
+        !Number.isSafeInteger(
+            byteLength
+        ) ||
+        byteLength < 0 ||
+        byteLength >
+            MAX_QUALITY_REPORT_BYTES
+    ) {
+        return undefined;
+    }
+
+    return takeUtf8Bytes(
+        flightStream,
+        marker.index +
+            marker[0].length,
+        byteLength
+    );
+}
+
+
+function extractNextFlightStream(
+    source: string
+): string | undefined {
+    const fragments:
+        string[] = [];
+
+    let length =
+        0;
+
+    const pattern =
+        /self\.__next_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)/g;
+
+    for (
+        const match
+        of source.matchAll(
+            pattern
+        )
+    ) {
+        let fragment:
+            string;
+
+        try {
+            fragment =
+                JSON.parse(
+                    match[1]
+                ) as string;
+        } catch {
+            continue;
+        }
+
+        length +=
+            fragment.length;
+
+        if (
+            length >
+            MAX_FLIGHT_STREAM_CHARS
+        ) {
+            return undefined;
+        }
+
+        fragments.push(
+            fragment
+        );
+    }
+
+    return fragments.length > 0
+        ? fragments.join(
+            ""
+        )
+        : undefined;
+}
+
+
+function takeUtf8Bytes(
+    source: string,
+    start: number,
+    byteLength: number
+): string | undefined {
+    if (
+        byteLength === 0
+    ) {
+        return "";
+    }
+
+    const bytes =
+        new TextEncoder()
+            .encode(
+                source.slice(
+                    start
+                )
+            );
+
+    if (
+        bytes.length <
+        byteLength
+    ) {
+        return undefined;
+    }
+
+    try {
+        return new TextDecoder(
+            "utf-8",
+            {
+                fatal:
+                    true,
+            }
+        ).decode(
+            bytes.subarray(
+                0,
+                byteLength
+            )
+        );
+    } catch {
+        return undefined;
+    }
+}
+
+
+function extractQualityIssues(
+    report: string
+): CodeQualityIssue[] {
+    const issues:
+        CodeQualityIssue[] = [];
+
+    const seen =
+        new Set<string>();
+
+    const pattern =
+        /(?:^|\r?\n)([A-Z]):\s*(\d+),\s*(\d+):\s*([^\r\n]+)/g;
+
+    for (
+        const match
+        of report.matchAll(
+            pattern
+        )
+    ) {
+        const line =
+            Number(
+                match[2]
+            );
+
+        const column =
+            Number(
+                match[3]
+            );
+
+        const message =
+            match[4]
+                .trim()
+                .slice(
+                    0,
+                    MAX_QUALITY_MESSAGE_CHARS
+                );
+
+        if (
+            !Number.isSafeInteger(
+                line
+            ) ||
+            line < 1 ||
+            !Number.isSafeInteger(
+                column
+            ) ||
+            column < 0 ||
+            !message
+        ) {
+            continue;
+        }
+
+        const category =
+            match[1];
+
+        const key =
+            `${category}:${line}:${column}:${message}`;
+
+        if (
+            seen.has(
+                key
+            )
+        ) {
+            continue;
+        }
+
+        seen.add(
+            key
+        );
+
+        issues.push({
+            category,
+            line,
+            column,
+            message,
+        });
+
+        if (
+            issues.length >=
+            MAX_QUALITY_ISSUES
+        ) {
+            break;
+        }
+    }
+
+    return issues;
+}
+
+
+function extractQualityFields(
+    source: string
+): QualityFields {
+    const pattern =
+        /\\?"pep8\\?"\s*:\s*\\?"([^"\\]*)\\?"\s*,\s*\\?"pep8_score\\?"\s*:\s*(null|[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)/g;
+
+    let fields:
+        QualityFields |
+        undefined;
+
+    for (
+        const match
+        of source.matchAll(
+            pattern
+        )
+    ) {
+        const score =
+            match[2] ===
+                "null"
+                ? undefined
+                : Number(
+                    match[2]
+                );
+
+        fields = {
+            report:
+                match[1],
+
+            score:
+                score !==
+                    undefined &&
+                Number.isFinite(
+                    score
+                )
+                    ? score
+                    : undefined,
+        };
+    }
+
+    return fields || {
+        report:
+            undefined,
+
+        score:
+            extractNumberField(
+                source,
+                "pep8_score"
+            ),
+    };
 }
 
 

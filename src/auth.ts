@@ -178,8 +178,17 @@ export async function checkLoginStatus(
         );
 
     if (!token) {
-        terminal.writeLine(
-            "Login status: Not logged in."
+        terminal.writeSection(
+            "Login",
+            [
+                {
+                    label:
+                        "Status",
+
+                    value:
+                        "Not logged in",
+                },
+            ]
         );
 
         return;
@@ -195,8 +204,17 @@ export async function checkLoginStatus(
                 token
             )
         ) {
-            terminal.writeLine(
-                "Login status: Session is valid."
+            terminal.writeSection(
+                "Login",
+                [
+                    {
+                        label:
+                            "Status",
+
+                        value:
+                            "Session is valid",
+                    },
+                ]
             );
 
             return;
@@ -206,8 +224,17 @@ export async function checkLoginStatus(
             secrets
         );
 
-        terminal.writeLine(
-            "Login status: Session expired."
+        terminal.writeSection(
+            "Login",
+            [
+                {
+                    label:
+                        "Status",
+
+                    value:
+                        "Session expired",
+                },
+            ]
         );
     } catch (error) {
         printAuthenticationError(
@@ -226,9 +253,8 @@ async function performLogin(
 ): Promise<boolean> {
     terminal.show(false);
 
-    terminal.writeLines(
-        "iJudge Login",
-        "------------"
+    terminal.writeSection(
+        "iJudge Login"
     );
 
     const username =
@@ -353,22 +379,50 @@ function printAuthenticationError(
         error instanceof
         IJudgeCompatibilityError
     ) {
-        terminal.writeLines(
-            heading,
-            "",
-            "iJudge compatibility error:",
-            error.message,
-            "The extension stopped rather than using unverified frontend data."
+        terminal.writeSection(
+            "Compatibility",
+            [
+                {
+                    label:
+                        "Operation",
+
+                    value:
+                        heading,
+                },
+                {
+                    label:
+                        "Reason",
+
+                    value:
+                        error.message,
+                },
+                "The extension stopped rather than using unverified frontend data.",
+            ]
         );
 
         return;
     }
 
-    terminal.writeLines(
-        heading,
-        getErrorMessage(
-            error
-        )
+    terminal.writeSection(
+        "Error",
+        [
+            {
+                label:
+                    "Operation",
+
+                value:
+                    heading,
+            },
+            {
+                label:
+                    "Reason",
+
+                value:
+                    getErrorMessage(
+                        error
+                    ),
+            },
+        ]
     );
 }
 

@@ -45,7 +45,7 @@ function createSecrets(initial) {
 }
 
 function createTerminal(promptValues = []) {
-    const calls = { show: [], cancelPrompt: 0, prompt: [], writeLine: [], writeLines: [] };
+    const calls = { show: [], cancelPrompt: 0, prompt: [], writeLine: [], writeLines: [], writeSection: [] };
     let promptIndex = 0;
     return {
         calls,
@@ -57,6 +57,7 @@ function createTerminal(promptValues = []) {
         },
         writeLine(value = "") { calls.writeLine.push(value); },
         writeLines(...values) { calls.writeLines.push(values); },
+        writeSection(title, rows = []) { calls.writeSection.push([title, rows]); },
     };
 }
 
@@ -182,7 +183,7 @@ test("compatibility failures are reported distinctly without exposing action ide
 
     assert.equal(await auth.login(secrets, terminal), false);
     const output = JSON.stringify(terminal.calls);
-    assert.match(output, /iJudge compatibility error/);
+    assert.match(output, /Compatibility/);
     assert.match(output, /stopped instead of guessing/);
     assert.doesNotMatch(output, /synthetic-login-action/);
 });

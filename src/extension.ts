@@ -31,6 +31,7 @@ import {
     averageExecutionMs,
     calculateQualityPercent,
     determineSubmissionStatus,
+    formatCodeQualityIssue,
     formatScore,
     SubmissionResult,
     submitSource,
@@ -131,9 +132,18 @@ async function handleSubmit(
     ) {
         terminal.show(true);
 
-        terminal.writeLines(
-            "",
-            "A submission is already in progress."
+        terminal.writeLine();
+        terminal.writeSection(
+            "Submission",
+            [
+                {
+                    label:
+                        "Status",
+
+                    value:
+                        "Already in progress",
+                },
+            ]
         );
 
         return;
@@ -252,36 +262,58 @@ async function performSubmission(
         discovery.value;
 
     if (!assignment) {
-        terminal.writeLines(
-            "",
-            `Problem ${source.problemId} was not found in any available enrolled course.`
+        terminal.writeLine();
+        terminal.writeSection(
+            "Assignment",
+            [
+                {
+                    label:
+                        "Problem",
+
+                    value:
+                        String(
+                            source.problemId
+                        ),
+                },
+                {
+                    label:
+                        "Status",
+
+                    value:
+                        "Not found in an available enrolled course",
+                },
+            ]
         );
 
         return;
     }
-
-    printAssignment(
-        terminal,
-        assignment
-    );
 
     const validationError =
         validateAssignment(
             assignment.problem
         );
 
+    printAssignment(
+        terminal,
+        assignment,
+        validationError
+            ? "Unavailable"
+            : "Available"
+    );
+
     if (validationError) {
-        terminal.writeLines(
-            "Status:   Unavailable",
-            "",
-            validationError
+        terminal.writeLine();
+        terminal.writeSection(
+            "Restriction",
+            [
+                validationError,
+            ]
         );
 
         return;
     }
 
     terminal.writeLines(
-        "Status:   Available",
         "",
         "Submitting..."
     );
@@ -350,13 +382,31 @@ async function performSubmission(
     const submissionId =
         submission.value;
 
-    terminal.writeLines(
-        `Submission ID: ${submissionId}`,
-        ""
+    terminal.writeLine();
+    terminal.writeSection(
+        "Submission",
+        [
+            {
+                label:
+                    "ID",
+
+                value:
+                    String(
+                        submissionId
+                    ),
+            },
+            {
+                label:
+                    "Status",
+
+                value:
+                    "Judging",
+            },
+        ]
     );
 
     terminal.write(
-        "Judging"
+        "\r\nProgress: "
     );
 
     let judging:
@@ -397,7 +447,7 @@ async function performSubmission(
                     onResume:
                         () =>
                             terminal.write(
-                                "Judging"
+                                "Progress: "
                             ),
                 }
             );
@@ -416,22 +466,61 @@ async function performSubmission(
     terminal.writeLine();
 
     if (!judging) {
-        terminal.writeLines(
-            "",
-            "Stopped waiting.",
-            `Submission ${submissionId} was not cancelled.`
+        terminal.writeLine();
+        terminal.writeSection(
+            "Submission",
+            [
+                {
+                    label:
+                        "ID",
+
+                    value:
+                        String(
+                            submissionId
+                        ),
+                },
+                {
+                    label:
+                        "Status",
+
+                    value:
+                        "Stopped waiting; submission was not cancelled",
+                },
+            ]
         );
 
         return;
     }
 
     if (!judging.value) {
-        terminal.writeLines(
-            "",
-            "Still judging.",
-            "Stopped waiting after 120 seconds.",
-            `Submission ID: ${submissionId}`,
-            "The submission was not cancelled."
+        terminal.writeLine();
+        terminal.writeSection(
+            "Submission",
+            [
+                {
+                    label:
+                        "ID",
+
+                    value:
+                        String(
+                            submissionId
+                        ),
+                },
+                {
+                    label:
+                        "Status",
+
+                    value:
+                        "Still judging",
+                },
+                {
+                    label:
+                        "Wait",
+
+                    value:
+                        "Stopped after 120 seconds; submission was not cancelled",
+                },
+            ]
         );
 
         return;
@@ -653,13 +742,42 @@ async function reauthenticate(
 
 function printAssignment(
     terminal: IJudgeTerminal,
-    assignment: AssignmentMatch
+    assignment: AssignmentMatch,
+    status: "Available" | "Unavailable"
 ): void {
-    terminal.writeLines(
-        "",
-        `Problem:  ${assignment.problem.id} - ${assignment.problem.title}`,
-        `Course:   ${assignment.course.name}`,
-        `Language: ${assignment.problem.language}`
+    terminal.writeLine();
+    terminal.writeSection(
+        "Assignment",
+        [
+            {
+                label:
+                    "Problem",
+
+                value:
+                    `${assignment.problem.id} - ${assignment.problem.title}`,
+            },
+            {
+                label:
+                    "Course",
+
+                value:
+                    assignment.course.name,
+            },
+            {
+                label:
+                    "Language",
+
+                value:
+                    assignment.problem.language,
+            },
+            {
+                label:
+                    "Status",
+
+                value:
+                    status,
+            },
+        ]
     );
 }
 
@@ -687,71 +805,147 @@ function printSubmissionResult(
             result
         );
 
-    terminal.writeLines(
-        "",
-        status,
-        "",
-        `Testcases:         ${passed}/${result.records.length} passed`,
-        `Score:             ${formatScore(result.score)}`
-    );
+    const resultRows = [
+        {
+            label:
+                "Status",
 
-    if (
-        result.qualityScore !==
-        undefined
-    ) {
-        terminal.writeLine(
-            `Quality:           ${
-                calculateQualityPercent(
-                    result.qualityScore
-                ).toFixed(
-                    2
-                )
-            }%`
-        );
-    }
+            value:
+                status,
+        },
+        {
+            label:
+                "Testcases",
+
+            value:
+                `${passed}/${result.records.length} passed`,
+        },
+        {
+            label:
+                "Score",
+
+            value:
+                formatScore(
+                    result.score
+                ),
+        },
+    ];
 
     if (
         average !==
         undefined
     ) {
-        terminal.writeLine(
-            `Average execution: ${average.toFixed(2)} ms`
-        );
+        resultRows.push({
+            label:
+                "Average execution",
+
+            value:
+                `${average.toFixed(2)} ms`,
+        });
     }
 
     if (
         status !==
         "Passed"
     ) {
-        terminal.writeLine(
-            `Result code:       ${result.result}`
+        resultRows.push({
+            label:
+                "Result code",
+
+            value:
+                result.result,
+        });
+    }
+
+    terminal.writeLine();
+    terminal.writeSection(
+        "Result",
+        resultRows
+    );
+
+    if (
+        result.qualityScore !==
+        undefined
+    ) {
+        const qualityPercent =
+            calculateQualityPercent(
+                result.qualityScore
+            );
+
+        const issueRows =
+            qualityPercent < 100
+                ? result.qualityIssues.map(
+                    (
+                        issue
+                    ) =>
+                        `- ${
+                            formatCodeQualityIssue(
+                                issue
+                            )
+                        }`
+                )
+                : [];
+
+        terminal.writeLine();
+        terminal.writeSection(
+            "Code Quality",
+            [
+                {
+                    label:
+                        "Score",
+
+                    value:
+                        `${
+                            qualityPercent.toFixed(
+                                2
+                            )
+                        }%`,
+                },
+                ...(
+                    issueRows.length > 0
+                        ? [
+                            "Issues:",
+                            ...issueRows,
+                        ]
+                        : []
+                ),
+            ]
         );
     }
 
-    terminal.writeLines(
-        "",
-        "Test cases:"
-    );
+    terminal.writeLine();
+    terminal.writeSection(
+        "Test Cases",
+        result.records.map(
+            (
+                record,
+                index
+            ) => {
+                const execution =
+                    record.execution ===
+                    undefined
+                        ? ""
+                        : ` (${(
+                            record.execution *
+                            1000
+                        ).toFixed(2)} ms)`;
 
-    result.records.forEach(
-        (
-            record,
-            index
-        ) =>
-            terminal.writeLine(
-                `${
-                    String(
-                        index + 1
-                    ).padStart(
-                        2,
-                        " "
-                    )
-                }  ${
-                    testcaseResultName(
-                        record.result
-                    )
-                }`
-            )
+                return (
+                    `${
+                        String(
+                            index + 1
+                        ).padStart(
+                            2,
+                            " "
+                        )
+                    }  ${
+                        testcaseResultName(
+                            record.result
+                        )
+                    }${execution}`
+                );
+            }
+        )
     );
 }
 
@@ -774,12 +968,27 @@ function printError(
         return;
     }
 
-    terminal.writeLines(
-        "",
-        heading,
-        getErrorMessage(
-            error
-        )
+    terminal.writeLine();
+    terminal.writeSection(
+        "Error",
+        [
+            {
+                label:
+                    "Operation",
+
+                value:
+                    heading,
+            },
+            {
+                label:
+                    "Reason",
+
+                value:
+                    getErrorMessage(
+                        error
+                    ),
+            },
+        ]
     );
 }
 
@@ -789,13 +998,26 @@ function printCompatibilityError(
     heading: string,
     error: IJudgeCompatibilityError
 ): void {
-    terminal.writeLines(
-        "",
-        heading,
-        "",
-        "iJudge compatibility error:",
-        error.message,
-        "The extension stopped rather than using unverified frontend data."
+    terminal.writeLine();
+    terminal.writeSection(
+        "Compatibility",
+        [
+            {
+                label:
+                    "Operation",
+
+                value:
+                    heading,
+            },
+            {
+                label:
+                    "Reason",
+
+                value:
+                    error.message,
+            },
+            "The extension stopped rather than using unverified frontend data.",
+        ]
     );
 }
 
@@ -806,9 +1028,12 @@ function showTerminalError(
 ): void {
     terminal.show(true);
 
-    terminal.writeLines(
-        "",
-        `Error: ${message}`
+    terminal.writeLine();
+    terminal.writeSection(
+        "Error",
+        [
+            message,
+        ]
     );
 }
 

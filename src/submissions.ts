@@ -24,7 +24,9 @@ import {
 export {
     averageExecutionMs,
     calculateQualityPercent,
+    CodeQualityIssue,
     determineSubmissionStatus,
+    formatCodeQualityIssue,
     formatScore,
     SubmissionResult,
     testcaseResultName,

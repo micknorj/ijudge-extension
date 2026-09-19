@@ -1,5 +1,10 @@
 import * as vscode from "vscode";
 
+import {
+    formatTerminalSection,
+    TerminalSectionRow,
+} from "./terminal-format";
+
 
 const MAX_INPUT_LENGTH =
     4096;
@@ -135,6 +140,19 @@ implements vscode.Disposable {
                 line
             );
         }
+    }
+
+
+    writeSection(
+        title: string,
+        rows: readonly TerminalSectionRow[] = []
+    ): void {
+        this.writeLines(
+            ...formatTerminalSection(
+                title,
+                rows
+            )
+        );
     }
 
 

@@ -16,7 +16,7 @@ An unofficial VS Code and VSCodium extension for submitting normal KMITL iJudge 
 - Validate Server Action references across inspected frontend sources
 - Keep discovered Server Action identifiers in memory only
 - Rediscover and retry once only when iJudge explicitly reports a stale Server Action
-- Poll judging results and display testcase results, score, quality and execution time
+- Poll judging results and display testcase results, score, available code-quality details and execution time
 - Cache course and problem metadata temporarily
 - Prevent duplicate submissions
 
@@ -98,7 +98,7 @@ Development tests are tracked in the repository but excluded from the packaged V
 Run them with:
 
 ```sh
-npm.cmd run compile
+npm run compile
 node --test tests/*.test.cjs
 ```
 
