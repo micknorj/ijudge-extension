@@ -115,6 +115,24 @@ test("generic 404 does not retry submission", async () => {
     assert.equal(invalidations, 0);
 });
 
+test("403 access restrictions do not retry submission or masquerade as session expiration", async () => {
+    let fetches = 0;
+    let invalidations = 0;
+    actions.getSubmitAction = async () => "synthetic-submit";
+    actions.invalidateSubmitAction = () => { invalidations++; };
+    http.fetchIJudge = async () => {
+        fetches++;
+        return new Response("", { status: 403 });
+    };
+
+    await assert.rejects(
+        submissions.submitSource({ problemId: 3155, courseId: 78, language: "Python", code: "x", accessToken: "synthetic-session" }),
+        (error) => !(error instanceof SessionExpiredError) && /HTTP 403/.test(error.message)
+    );
+    assert.equal(fetches, 1);
+    assert.equal(invalidations, 0);
+});
+
 test("5xx does not retry submission", async () => {
     let fetches = 0;
     actions.getSubmitAction = async () => "synthetic-submit";

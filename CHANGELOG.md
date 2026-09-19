@@ -2,6 +2,22 @@
 
 Notable changes to iJudge Extension.
 
+## 0.8.2 - 2026-09-19
+
+Exam-labelled practice assignment compatibility release.
+
+### Changed
+
+- Removed the blanket client-side rejection based only on exam wording or iJudge's exam label
+- Allowed exam-labelled assignments when normal authenticated discovery exposes them as currently available
+- Preserved Python-only, enrollment, release-time, expiration, disabled-submission and server-side access restrictions
+
+### Reliability
+
+- Added regression coverage for available exam-labelled assignments and unavailable problem discovery
+- Added submission coverage confirming that HTTP 403 access restrictions remain distinct and are not retried
+- Preserved authentication, same-origin networking, Server Action discovery and ambiguous-submission retry safeguards
+
 ## 0.8.1 - 2026-09-19
 
 Focused terminal presentation release.

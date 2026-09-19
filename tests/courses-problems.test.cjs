@@ -162,39 +162,57 @@ test("allows a normal eligible Python assignment", () => {
     assert.equal(validateAssignment(problem()), undefined);
 });
 
-test("blocks exam-labelled assignments", () => {
+test("allows eligible assignments regardless of exam wording in the problem title", () => {
     for (const title of ["Midterm Problem", "Final exam", "Examination 1"]) {
-        assert.match(validateAssignment(problem({ title })), /Exam-labelled assignments/);
+        assert.equal(validateAssignment(problem({ title })), undefined);
     }
 });
 
 test("blocks disabled submissions", () => {
-    assert.match(validateAssignment(problem({ submitDisabled: true })), /disabled/);
+    assert.match(
+        validateAssignment(problem({ title: "Final Exam Practice", submitDisabled: true })),
+        /disabled/
+    );
 });
 
 test("blocks unreleased assignments", () => {
     assert.match(
-        validateAssignment(problem({ releaseTime: new Date(Date.now() + 60_000), expireTime: new Date(Date.now() + 120_000) })),
+        validateAssignment(problem({
+            title: "Final Exam Practice",
+            releaseTime: new Date(Date.now() + 60_000),
+            expireTime: new Date(Date.now() + 120_000),
+        })),
         /not been released/
     );
 });
 
 test("blocks expired assignments", () => {
     assert.match(
-        validateAssignment(problem({ releaseTime: new Date(Date.now() - 120_000), expireTime: new Date(Date.now() - 60_000) })),
+        validateAssignment(problem({
+            title: "Final Exam Practice",
+            releaseTime: new Date(Date.now() - 120_000),
+            expireTime: new Date(Date.now() - 60_000),
+        })),
         /no longer accepting/
     );
 });
 
 test("blocks non-Python assignments", () => {
-    assert.match(validateAssignment(problem({ language: "C++" })), /not Python/);
+    assert.match(
+        validateAssignment(problem({ title: "Final Exam Practice", language: "C++" })),
+        /not Python/
+    );
 });
 
-test("findAssignment skips exam-labelled courses without fetching them", async () => {
+test("finds an available exam-labelled assignment for normal validation", async () => {
     const fetched = [];
     client.fetchAuthenticatedPage = async (path) => {
         fetched.push(path);
-        return courseProblemSource(79, { cpId: 3155 });
+        return courseProblemSource(78, {
+            isExam: true,
+            cpId: 3155,
+            title: "Final Exam Practice",
+        });
     };
 
     const match = await findAssignment(
@@ -206,29 +224,27 @@ test("findAssignment skips exam-labelled courses without fetching them", async (
         "synthetic-session"
     );
 
-    assert.equal(match.course.id, 79);
-    assert.deepEqual(fetched, ["/courses/79/problems"]);
+    assert.equal(match.course.id, 78);
+    assert.equal(match.problem.title, "Final Exam Practice");
+    assert.equal(validateAssignment(match.problem), undefined);
+    assert.deepEqual(fetched, ["/courses/78/problems"]);
 });
 
-test("findAssignment skips courses explicitly marked as exams", async () => {
+test("findAssignment returns undefined when enrolled course data does not expose the problem", async () => {
     const fetched = [];
     client.fetchAuthenticatedPage = async (path) => {
         fetched.push(path);
-        if (path === "/courses/78/problems") {
-            return courseProblemSource(78, { isExam: true, cpId: 3155 });
-        }
-        return courseProblemSource(79, { isExam: false, cpId: 3155 });
+        return courseProblemSource(78, { cpId: 9999 });
     };
 
     const match = await findAssignment(
         3155,
         [
-            { id: 78, name: "Course A", enrolled: true },
-            { id: 79, name: "Course B", enrolled: true },
+            { id: 78, name: "Programming", enrolled: true },
         ],
         "synthetic-session"
     );
 
-    assert.equal(match.course.id, 79);
-    assert.deepEqual(fetched, ["/courses/78/problems", "/courses/79/problems"]);
+    assert.equal(match, undefined);
+    assert.deepEqual(fetched, ["/courses/78/problems"]);
 });

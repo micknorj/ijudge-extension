@@ -2,7 +2,7 @@
   "name": "tools-ijudge",
   "displayName": "iJudge Extension",
   "description": "An unofficial KMITL iJudge assignment submission extension for VS Code and VSCodium. Part of Mick's Tools.",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "publisher": "micknorj",
   "author": "micknorj",
   "license": "MIT",

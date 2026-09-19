@@ -67,25 +67,11 @@ export async function findAssignment(
         const course
         of courses
     ) {
-        if (
-            looksLikeExam(
-                course.name
-            )
-        ) {
-            continue;
-        }
-
         const data =
             await getCourseProblems(
                 course.id,
                 accessToken
             );
-
-        if (
-            data.isExam
-        ) {
-            continue;
-        }
 
         const problem =
             data.problems.find(
@@ -115,16 +101,6 @@ export async function findAssignment(
 export function validateAssignment(
     problem: IJudgeProblem
 ): string | undefined {
-    if (
-        looksLikeExam(
-            problem.title
-        )
-    ) {
-        return (
-            "Exam-labelled assignments are not supported by automatic submission."
-        );
-    }
-
     if (
         problem.language
             .toLowerCase() !==
@@ -429,16 +405,4 @@ function cloneProblem(
                 problem.expireTime
             ),
     };
-}
-
-
-function looksLikeExam(
-    value: string
-): boolean {
-    return (
-        /\b(midterm|final|exam|examination)\b/i
-            .test(
-                value
-            )
-    );
 }

@@ -188,19 +188,18 @@ If required course or problem data cannot be recognized safely, the extension st
 
 ## Assignment restrictions
 
-The extension is intended for normal programming assignments available to the authenticated user.
+The extension is intended for Python programming assignments available to the authenticated user.
 
-Automatic submission is blocked when an assignment is identified as examination-related.
+An exam label alone does not block submission. Exam-labelled assignments are considered only when iJudge exposes them through the authenticated student's enrolled courses and their current assignment metadata permits submission.
 
 Restrictions include checks for:
 
-- Exam-labelled courses
-- Exam-labelled problems
-- iJudge exam state
+- Course enrollment and authorization
 - Non-Python assignments
 - Disabled submissions
 - Assignments that have not yet been released
 - Expired assignments
+- Server-side examination and access restrictions
 
 The extension does not attempt to weaken or override server-side restrictions.
 
@@ -254,7 +253,9 @@ Security issues may include:
 
 ## Examination restrictions
 
-The extension is not intended to automate examination submissions. Automatic submission of exam-labelled assignments is intentionally blocked.
+Exam labels may remain on assignments that iJudge later reopens for practice. The extension does not treat the label alone as an access restriction.
+
+Exam-labelled assignments can proceed only when normal authenticated discovery exposes them and the current release, expiration and submission state permits submission. iJudge remains authoritative for server-side examination and access restrictions.
 
 Normal project development must not bypass authentication, enrollment, release times, expiration times, disabled submission state, examination restrictions or other iJudge controls.
 

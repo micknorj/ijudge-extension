@@ -2,7 +2,7 @@
 
 Part of Mick's Tools.
 
-An unofficial VS Code and VSCodium extension for submitting normal KMITL iJudge assignments from the editor.
+An unofficial VS Code and VSCodium extension for submitting available KMITL iJudge assignments from the editor.
 
 ## Features
 
@@ -86,8 +86,8 @@ Discovered Server Action identifiers are not written to settings, SecretStorage,
 ## Limitations
 
 - Python assignments only
-- Intended for normal programming assignments available to the authenticated student account
-- Automatic submission of exam-labelled assignments is blocked
+- Intended for programming assignments available to the authenticated student account
+- Exam-labelled assignments can be submitted when iJudge exposes them as currently available
 - Does not bypass authentication, enrollment, release times, expiration times, disabled submissions, access controls or examination restrictions
 - Changes to the iJudge website or internal interface may temporarily break compatibility
 
